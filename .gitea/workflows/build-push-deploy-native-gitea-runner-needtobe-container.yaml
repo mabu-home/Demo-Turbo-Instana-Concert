@@ -394,6 +394,12 @@ jobs:
               echo "⚠️  SARIF scan failed with exit code $EXIT_CODE"
             fi
             
+            # Debug: Check if file was created
+            echo ""
+            echo "Debug: Checking for SARIF file immediately after scan..."
+            ls -la semgrep-results.sarif 2>&1 || echo "File not found in current directory"
+            ls -la "$WORKSPACE_DIR/semgrep-results.sarif" 2>&1 || echo "File not found in workspace"
+            
             # Run JSON scan
             echo ""
             echo "Generating JSON output..."
@@ -414,6 +420,12 @@ jobs:
             else
               echo "⚠️  JSON scan failed with exit code $EXIT_CODE"
             fi
+            
+            # Debug: Check if file was created
+            echo ""
+            echo "Debug: Checking for JSON file immediately after scan..."
+            ls -la semgrep-results.json 2>&1 || echo "File not found in current directory"
+            ls -la "$WORKSPACE_DIR/semgrep-results.json" 2>&1 || echo "File not found in workspace"
           fi
           
           # Verify files were created
@@ -877,16 +889,29 @@ jobs:
           else
             # Generate SBOM using Docker container
             echo "Using Docker-based syft..."
-            # First, generate to a mounted directory
+            echo "Debug: Current directory: $(pwd)"
+            echo "Debug: Workspace directory: $WORKSPACE_DIR"
+            echo "Debug: Workspace directory exists: $([ -d "$WORKSPACE_DIR" ] && echo 'yes' || echo 'no')"
+            echo "Debug: Workspace directory writable: $([ -w "$WORKSPACE_DIR" ] && echo 'yes' || echo 'no')"
+            
+            # Generate to current directory first, then copy
             if docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
-              -v "$WORKSPACE_DIR:/output" \
+              -v "$(pwd):/output" \
               anchore/syft:latest \
               "${IMAGE_NAME}:latest" \
               -o cyclonedx-json=/output/sbom-java-cyclonedx.json; then
-              echo "✓ Java SBOM generated to workspace"
-              # Copy to /tmp for backup
-              cp "$WORKSPACE_DIR/sbom-java-cyclonedx.json" "/tmp/sbom-output/sbom-java-cyclonedx.json" 2>/dev/null || true
+              echo "✓ Java SBOM generated"
+              
+              # Check if file was created
+              if [ -f "sbom-java-cyclonedx.json" ]; then
+                echo "✓ SBOM file found in current directory"
+                # Copy to workspace and /tmp
+                cp sbom-java-cyclonedx.json "$WORKSPACE_DIR/" 2>/dev/null || echo "⚠️  Could not copy to workspace"
+                cp sbom-java-cyclonedx.json "/tmp/sbom-output/" 2>/dev/null || echo "⚠️  Could not copy to /tmp"
+              else
+                echo "⚠️  SBOM file not found in current directory after generation"
+              fi
             else
               echo "❌ Syft scan failed (Docker)"
               exit 1
@@ -896,6 +921,9 @@ jobs:
           echo ""
           echo "Verifying generated files:"
           echo ""
+          echo "Current directory ($(pwd)):"
+          ls -lh sbom-java*.json 2>/dev/null || echo "  ⚠️  No files found"
+          echo ""
           echo "Workspace directory ($WORKSPACE_DIR):"
           ls -lh "$WORKSPACE_DIR"/sbom-java*.json 2>/dev/null || echo "  ⚠️  No files found"
           echo ""
@@ -904,7 +932,7 @@ jobs:
           echo ""
           
           # Verify at least one file was created
-          if [ -f "$WORKSPACE_DIR/sbom-java-cyclonedx.json" ] || [ -f "/tmp/sbom-output/sbom-java-cyclonedx.json" ]; then
+          if [ -f "sbom-java-cyclonedx.json" ] || [ -f "$WORKSPACE_DIR/sbom-java-cyclonedx.json" ] || [ -f "/tmp/sbom-output/sbom-java-cyclonedx.json" ]; then
             echo "✓ SBOM file verification passed"
           else
             echo "❌ SBOM file verification failed - no files created"
@@ -960,16 +988,29 @@ jobs:
           else
             # Generate SBOM using Docker container
             echo "Using Docker-based syft..."
-            # First, generate to a mounted directory
+            echo "Debug: Current directory: $(pwd)"
+            echo "Debug: Workspace directory: $WORKSPACE_DIR"
+            echo "Debug: Workspace directory exists: $([ -d "$WORKSPACE_DIR" ] && echo 'yes' || echo 'no')"
+            echo "Debug: Workspace directory writable: $([ -w "$WORKSPACE_DIR" ] && echo 'yes' || echo 'no')"
+            
+            # Generate to current directory first, then copy
             if docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
-              -v "$WORKSPACE_DIR:/output" \
+              -v "$(pwd):/output" \
               anchore/syft:latest \
               "${IMAGE_NAME}:latest" \
               -o cyclonedx-json=/output/sbom-python-cyclonedx.json; then
-              echo "✓ Python SBOM generated to workspace"
-              # Copy to /tmp for backup
-              cp "$WORKSPACE_DIR/sbom-python-cyclonedx.json" "/tmp/sbom-output/sbom-python-cyclonedx.json" 2>/dev/null || true
+              echo "✓ Python SBOM generated"
+              
+              # Check if file was created
+              if [ -f "sbom-python-cyclonedx.json" ]; then
+                echo "✓ SBOM file found in current directory"
+                # Copy to workspace and /tmp
+                cp sbom-python-cyclonedx.json "$WORKSPACE_DIR/" 2>/dev/null || echo "⚠️  Could not copy to workspace"
+                cp sbom-python-cyclonedx.json "/tmp/sbom-output/" 2>/dev/null || echo "⚠️  Could not copy to /tmp"
+              else
+                echo "⚠️  SBOM file not found in current directory after generation"
+              fi
             else
               echo "❌ Syft scan failed (Docker)"
               exit 1
@@ -979,6 +1020,9 @@ jobs:
           echo ""
           echo "Verifying generated files:"
           echo ""
+          echo "Current directory ($(pwd)):"
+          ls -lh sbom-python*.json 2>/dev/null || echo "  ⚠️  No files found"
+          echo ""
           echo "Workspace directory ($WORKSPACE_DIR):"
           ls -lh "$WORKSPACE_DIR"/sbom-python*.json 2>/dev/null || echo "  ⚠️  No files found"
           echo ""
@@ -987,7 +1031,7 @@ jobs:
           echo ""
           
           # Verify at least one file was created
-          if [ -f "$WORKSPACE_DIR/sbom-python-cyclonedx.json" ] || [ -f "/tmp/sbom-output/sbom-python-cyclonedx.json" ]; then
+          if [ -f "sbom-python-cyclonedx.json" ] || [ -f "$WORKSPACE_DIR/sbom-python-cyclonedx.json" ] || [ -f "/tmp/sbom-output/sbom-python-cyclonedx.json" ]; then
             echo "✓ SBOM file verification passed"
           else
             echo "❌ SBOM file verification failed - no files created"
