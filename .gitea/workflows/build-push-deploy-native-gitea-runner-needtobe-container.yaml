@@ -375,57 +375,61 @@ jobs:
             # Note: Semgrep exit code 2 means findings were found (not an error)
             # Exit codes: 0 = no findings, 1 = error, 2 = findings found
             
-            # Run SARIF scan
+            # Run SARIF scan - capture output to stdout and save to file
             echo "Generating SARIF output..."
-            docker run --rm \
+            echo "Debug: Current directory permissions: $(ls -ld $(pwd))"
+            echo "Debug: Current user: $(whoami)"
+            echo "Debug: Current user ID: $(id -u)"
+            
+            # Try to write directly to stdout and capture
+            SARIF_OUTPUT=$(docker run --rm \
               -v "$(pwd):/src" \
               -w /src \
               returntocorp/semgrep:latest \
               semgrep --config=auto \
               --sarif \
-              --output=/src/semgrep-results.sarif \
-              java-app/ python-app/ 2>&1 || EXIT_CODE=$?
+              java-app/ python-app/ 2>&1) || EXIT_CODE=$?
             
             # Check exit code (0 or 2 are success, 1 is error)
             if [ -z "$EXIT_CODE" ] || [ "$EXIT_CODE" = "0" ] || [ "$EXIT_CODE" = "2" ]; then
               echo "✓ SARIF scan completed (exit code: ${EXIT_CODE:-0})"
               SCAN_SUCCESS=true
+              
+              # Save output to file
+              echo "$SARIF_OUTPUT" > semgrep-results.sarif
+              echo "✓ SARIF output saved to file"
+              ls -lh semgrep-results.sarif
             else
               echo "⚠️  SARIF scan failed with exit code $EXIT_CODE"
+              echo "Output: $SARIF_OUTPUT"
             fi
             
-            # Debug: Check if file was created
-            echo ""
-            echo "Debug: Checking for SARIF file immediately after scan..."
-            ls -la semgrep-results.sarif 2>&1 || echo "File not found in current directory"
-            ls -la "$WORKSPACE_DIR/semgrep-results.sarif" 2>&1 || echo "File not found in workspace"
-            
-            # Run JSON scan
+            # Run JSON scan - capture output to stdout and save to file
             echo ""
             echo "Generating JSON output..."
             unset EXIT_CODE
-            docker run --rm \
+            
+            JSON_OUTPUT=$(docker run --rm \
               -v "$(pwd):/src" \
               -w /src \
               returntocorp/semgrep:latest \
               semgrep --config=auto \
               --json \
-              --output=/src/semgrep-results.json \
-              java-app/ python-app/ 2>&1 || EXIT_CODE=$?
+              java-app/ python-app/ 2>&1) || EXIT_CODE=$?
             
             # Check exit code (0 or 2 are success, 1 is error)
             if [ -z "$EXIT_CODE" ] || [ "$EXIT_CODE" = "0" ] || [ "$EXIT_CODE" = "2" ]; then
               echo "✓ JSON scan completed (exit code: ${EXIT_CODE:-0})"
               SCAN_SUCCESS=true
+              
+              # Save output to file
+              echo "$JSON_OUTPUT" > semgrep-results.json
+              echo "✓ JSON output saved to file"
+              ls -lh semgrep-results.json
             else
               echo "⚠️  JSON scan failed with exit code $EXIT_CODE"
+              echo "Output: $JSON_OUTPUT"
             fi
-            
-            # Debug: Check if file was created
-            echo ""
-            echo "Debug: Checking for JSON file immediately after scan..."
-            ls -la semgrep-results.json 2>&1 || echo "File not found in current directory"
-            ls -la "$WORKSPACE_DIR/semgrep-results.json" 2>&1 || echo "File not found in workspace"
           fi
           
           # Verify files were created
@@ -887,33 +891,34 @@ jobs:
               exit 1
             fi
           else
-            # Generate SBOM using Docker container
+            # Generate SBOM using Docker container - capture output to stdout
             echo "Using Docker-based syft..."
             echo "Debug: Current directory: $(pwd)"
             echo "Debug: Workspace directory: $WORKSPACE_DIR"
-            echo "Debug: Workspace directory exists: $([ -d "$WORKSPACE_DIR" ] && echo 'yes' || echo 'no')"
-            echo "Debug: Workspace directory writable: $([ -w "$WORKSPACE_DIR" ] && echo 'yes' || echo 'no')"
             
-            # Generate to current directory first, then copy
-            if docker run --rm \
+            # Capture SBOM output to variable
+            SBOM_OUTPUT=$(docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
-              -v "$(pwd):/output" \
               anchore/syft:latest \
               "${IMAGE_NAME}:latest" \
-              -o cyclonedx-json=/output/sbom-java-cyclonedx.json; then
+              -o cyclonedx-json 2>&1)
+            
+            SYFT_EXIT=$?
+            
+            if [ $SYFT_EXIT -eq 0 ]; then
               echo "✓ Java SBOM generated"
               
-              # Check if file was created
-              if [ -f "sbom-java-cyclonedx.json" ]; then
-                echo "✓ SBOM file found in current directory"
-                # Copy to workspace and /tmp
-                cp sbom-java-cyclonedx.json "$WORKSPACE_DIR/" 2>/dev/null || echo "⚠️  Could not copy to workspace"
-                cp sbom-java-cyclonedx.json "/tmp/sbom-output/" 2>/dev/null || echo "⚠️  Could not copy to /tmp"
-              else
-                echo "⚠️  SBOM file not found in current directory after generation"
-              fi
+              # Write output to file
+              echo "$SBOM_OUTPUT" > sbom-java-cyclonedx.json
+              echo "✓ SBOM file written to current directory"
+              ls -lh sbom-java-cyclonedx.json
+              
+              # Copy to workspace and /tmp
+              cp sbom-java-cyclonedx.json "$WORKSPACE_DIR/" 2>/dev/null && echo "✓ Copied to workspace" || echo "⚠️  Could not copy to workspace"
+              cp sbom-java-cyclonedx.json "/tmp/sbom-output/" 2>/dev/null && echo "✓ Copied to /tmp" || echo "⚠️  Could not copy to /tmp"
             else
-              echo "❌ Syft scan failed (Docker)"
+              echo "❌ Syft scan failed (Docker) with exit code $SYFT_EXIT"
+              echo "Output: $SBOM_OUTPUT"
               exit 1
             fi
           fi
@@ -986,33 +991,34 @@ jobs:
               exit 1
             fi
           else
-            # Generate SBOM using Docker container
+            # Generate SBOM using Docker container - capture output to stdout
             echo "Using Docker-based syft..."
             echo "Debug: Current directory: $(pwd)"
             echo "Debug: Workspace directory: $WORKSPACE_DIR"
-            echo "Debug: Workspace directory exists: $([ -d "$WORKSPACE_DIR" ] && echo 'yes' || echo 'no')"
-            echo "Debug: Workspace directory writable: $([ -w "$WORKSPACE_DIR" ] && echo 'yes' || echo 'no')"
             
-            # Generate to current directory first, then copy
-            if docker run --rm \
+            # Capture SBOM output to variable
+            SBOM_OUTPUT=$(docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
-              -v "$(pwd):/output" \
               anchore/syft:latest \
               "${IMAGE_NAME}:latest" \
-              -o cyclonedx-json=/output/sbom-python-cyclonedx.json; then
+              -o cyclonedx-json 2>&1)
+            
+            SYFT_EXIT=$?
+            
+            if [ $SYFT_EXIT -eq 0 ]; then
               echo "✓ Python SBOM generated"
               
-              # Check if file was created
-              if [ -f "sbom-python-cyclonedx.json" ]; then
-                echo "✓ SBOM file found in current directory"
-                # Copy to workspace and /tmp
-                cp sbom-python-cyclonedx.json "$WORKSPACE_DIR/" 2>/dev/null || echo "⚠️  Could not copy to workspace"
-                cp sbom-python-cyclonedx.json "/tmp/sbom-output/" 2>/dev/null || echo "⚠️  Could not copy to /tmp"
-              else
-                echo "⚠️  SBOM file not found in current directory after generation"
-              fi
+              # Write output to file
+              echo "$SBOM_OUTPUT" > sbom-python-cyclonedx.json
+              echo "✓ SBOM file written to current directory"
+              ls -lh sbom-python-cyclonedx.json
+              
+              # Copy to workspace and /tmp
+              cp sbom-python-cyclonedx.json "$WORKSPACE_DIR/" 2>/dev/null && echo "✓ Copied to workspace" || echo "⚠️  Could not copy to workspace"
+              cp sbom-python-cyclonedx.json "/tmp/sbom-output/" 2>/dev/null && echo "✓ Copied to /tmp" || echo "⚠️  Could not copy to /tmp"
             else
-              echo "❌ Syft scan failed (Docker)"
+              echo "❌ Syft scan failed (Docker) with exit code $SYFT_EXIT"
+              echo "Output: $SBOM_OUTPUT"
               exit 1
             fi
           fi
