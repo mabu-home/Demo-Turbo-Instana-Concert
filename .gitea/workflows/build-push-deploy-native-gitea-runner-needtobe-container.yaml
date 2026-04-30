@@ -569,20 +569,26 @@ jobs:
           # Upload SARIF results to Concert
           echo ""
           echo "Uploading SAST results to Concert..."
-          HTTP_CODE=$(curl -w "%{http_code}" -o /tmp/concert-sast-response.json \
+          
+          # Use silent mode and only capture HTTP code (no progress output)
+          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/concert-sast-response.json \
             -X POST "${CONCERT_URL}/core/api/v1/applications/demo-turbo-instana-concert/sast_results" \
             -H "C_API_KEY: ${CONCERT_API_KEY}" \
             -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
             -H "Content-Type: application/sarif+json" \
             --data-binary @"$SARIF_FILE" \
             --connect-timeout 10 \
-            --max-time 60 \
-            2>&1)
+            --max-time 60)
           
           echo "HTTP Response Code: ${HTTP_CODE}"
           echo ""
           
-          if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
+          # Check if HTTP_CODE is a valid number
+          if ! [[ "${HTTP_CODE}" =~ ^[0-9]+$ ]]; then
+            echo "⚠️  Invalid HTTP response code: ${HTTP_CODE}"
+            echo "This may indicate a network or curl error"
+            cat /tmp/concert-sast-response.json 2>/dev/null || true
+          elif [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
             echo "✓ Semgrep SAST results uploaded successfully to Concert"
             if [ -f /tmp/concert-sast-response.json ]; then
               echo ""
@@ -592,16 +598,19 @@ jobs:
           elif [ "${HTTP_CODE}" = "401" ]; then
             echo "❌ Concert SAST upload failed: Authentication error (HTTP ${HTTP_CODE})"
             echo "Check CONCERT_API_KEY and CONCERT_INSTANCE_ID secrets"
+            echo "Response:"
             cat /tmp/concert-sast-response.json 2>/dev/null || true
           elif [ "${HTTP_CODE}" = "404" ]; then
             echo "❌ Concert SAST upload failed: Application not found (HTTP ${HTTP_CODE})"
             echo "Ensure 'demo-turbo-instana-concert' application exists in Concert"
+            echo "Response:"
             cat /tmp/concert-sast-response.json 2>/dev/null || true
           elif [ "${HTTP_CODE}" = "000" ]; then
             echo "❌ Concert SAST upload failed: Cannot connect to Concert API"
             echo "Check CONCERT_URL and network connectivity"
           else
             echo "⚠️  Concert SAST upload failed with HTTP ${HTTP_CODE}"
+            echo "Response:"
             cat /tmp/concert-sast-response.json 2>/dev/null || true
           fi
           
@@ -1090,7 +1099,7 @@ jobs:
             echo "Uploading Java SBOM (CycloneDX format)..."
             echo "Using Concert Ingestion API: ${CONCERT_URL}/ingestion/api/v1/upload_files"
             
-            HTTP_CODE=$(curl -w "%{http_code}" -o /tmp/concert-sbom-java-response.json \
+            HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/concert-sbom-java-response.json \
               -X POST "${CONCERT_URL}/ingestion/api/v1/upload_files" \
               -H "accept: application/json" \
               -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
@@ -1100,11 +1109,16 @@ jobs:
             
             echo "HTTP Response Code: ${HTTP_CODE}"
             
-            if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
+            if ! [[ "${HTTP_CODE}" =~ ^[0-9]+$ ]]; then
+              echo "⚠️  Invalid HTTP response code: ${HTTP_CODE}"
+              cat /tmp/concert-sbom-java-response.json 2>/dev/null || true
+            elif [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
               echo "✓ Java SBOM uploaded successfully to Concert"
+              echo "Response:"
               cat /tmp/concert-sbom-java-response.json 2>/dev/null || true
             else
               echo "⚠️  Java SBOM upload failed with HTTP ${HTTP_CODE}"
+              echo "Response:"
               cat /tmp/concert-sbom-java-response.json 2>/dev/null || true
             fi
           else
@@ -1118,7 +1132,7 @@ jobs:
             echo "Uploading Python SBOM (CycloneDX format)..."
             echo "Using Concert Ingestion API: ${CONCERT_URL}/ingestion/api/v1/upload_files"
             
-            HTTP_CODE=$(curl -w "%{http_code}" -o /tmp/concert-sbom-python-response.json \
+            HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/concert-sbom-python-response.json \
               -X POST "${CONCERT_URL}/ingestion/api/v1/upload_files" \
               -H "accept: application/json" \
               -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
@@ -1128,11 +1142,16 @@ jobs:
             
             echo "HTTP Response Code: ${HTTP_CODE}"
             
-            if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
+            if ! [[ "${HTTP_CODE}" =~ ^[0-9]+$ ]]; then
+              echo "⚠️  Invalid HTTP response code: ${HTTP_CODE}"
+              cat /tmp/concert-sbom-python-response.json 2>/dev/null || true
+            elif [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
               echo "✓ Python SBOM uploaded successfully to Concert"
+              echo "Response:"
               cat /tmp/concert-sbom-python-response.json 2>/dev/null || true
             else
               echo "⚠️  Python SBOM upload failed with HTTP ${HTTP_CODE}"
+              echo "Response:"
               cat /tmp/concert-sbom-python-response.json 2>/dev/null || true
             fi
           else
@@ -1144,14 +1163,39 @@ jobs:
           echo "Note: Upload failures are non-blocking, workflow continues..."
           echo "============================================"
 
-      # Step 15: Upload SBOM Artifacts
-      - name: Upload SBOM Artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: sbom-files
-          path: |
-            sbom-*.json
-          retention-days: 90
+      # Step 15: Archive SBOM Files (for local reference)
+      - name: Archive SBOM Files
+        continue-on-error: true
+        run: |
+          echo "============================================"
+          echo "Archiving SBOM Files"
+          echo "============================================"
+          
+          # Create archive directory
+          ARCHIVE_DIR="/tmp/sbom-archive-$(date +%Y%m%d-%H%M%S)"
+          mkdir -p "$ARCHIVE_DIR"
+          
+          # Copy SBOM files to archive
+          if [ -f "sbom-java-cyclonedx.json" ]; then
+            cp sbom-java-cyclonedx.json "$ARCHIVE_DIR/" && echo "✓ Archived Java SBOM"
+          fi
+          
+          if [ -f "sbom-python-cyclonedx.json" ]; then
+            cp sbom-python-cyclonedx.json "$ARCHIVE_DIR/" && echo "✓ Archived Python SBOM"
+          fi
+          
+          if [ -f "semgrep-results.sarif" ]; then
+            cp semgrep-results.sarif "$ARCHIVE_DIR/" && echo "✓ Archived Semgrep SARIF"
+          fi
+          
+          if [ -f "semgrep-results.json" ]; then
+            cp semgrep-results.json "$ARCHIVE_DIR/" && echo "✓ Archived Semgrep JSON"
+          fi
+          
+          echo ""
+          echo "Archive location: $ARCHIVE_DIR"
+          ls -lh "$ARCHIVE_DIR"
+          echo "============================================"
 
       # Step 16: Setup kubeconfig
       - name: Setup kubeconfig
