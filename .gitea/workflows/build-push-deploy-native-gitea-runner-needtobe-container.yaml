@@ -319,25 +319,27 @@ jobs:
             ls -la java-app/ python-app/
             
             # Run SARIF scan
+            echo "Running SARIF scan..."
             docker run --rm \
               -v "$(pwd):/src" \
               returntocorp/semgrep:latest \
               semgrep --config=auto \
               --sarif \
               --output=/src/semgrep-results.sarif \
-              /src/java-app/ /src/python-app/ || {
-              echo "⚠️  Semgrep SARIF scan failed, continuing..."
+              /src/java-app/ /src/python-app/ 2>&1 || {
+              echo "⚠️  Semgrep SARIF scan failed with exit code $?, continuing..."
             }
             
             # Run JSON scan
+            echo "Running JSON scan..."
             docker run --rm \
               -v "$(pwd):/src" \
               returntocorp/semgrep:latest \
               semgrep --config=auto \
               --json \
               --output=/src/semgrep-results.json \
-              /src/java-app/ /src/python-app/ || {
-              echo "⚠️  Semgrep JSON scan failed, continuing..."
+              /src/java-app/ /src/python-app/ 2>&1 || {
+              echo "⚠️  Semgrep JSON scan failed with exit code $?, continuing..."
             }
           fi
           
@@ -815,15 +817,21 @@ jobs:
           echo "Concert URL: ${CONCERT_URL}"
           echo ""
           
+          # Check for SBOM files in current directory or WORKSPACE_DIR
+          SBOM_DIR="${WORKSPACE_DIR:-.}"
+          echo "Looking for SBOM files in: ${SBOM_DIR}"
+          ls -lh "${SBOM_DIR}"/sbom-*.json 2>/dev/null || echo "No SBOM files found"
+          echo ""
+          
           # Upload Java SBOM (CycloneDX format - preferred by Concert)
-          if [ -f "$WORKSPACE_DIR/sbom-java-cyclonedx.json" ]; then
+          if [ -f "${SBOM_DIR}/sbom-java-cyclonedx.json" ]; then
             echo "Uploading Java SBOM (CycloneDX format)..."
             HTTP_CODE=$(curl -w "%{http_code}" -o /tmp/concert-sbom-java-response.json \
               -X POST "${CONCERT_URL}/core/api/v1/applications/demo-turbo-instana-concert/sbom" \
               -H "C_API_KEY: ${CONCERT_API_KEY}" \
               -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
               -H "Content-Type: application/json" \
-              --data-binary @"$WORKSPACE_DIR/sbom-java-cyclonedx.json")
+              --data-binary @"${SBOM_DIR}/sbom-java-cyclonedx.json")
             
             echo "HTTP Response Code: ${HTTP_CODE}"
             
@@ -835,20 +843,20 @@ jobs:
               cat /tmp/concert-sbom-java-response.json 2>/dev/null || true
             fi
           else
-            echo "⚠️  Java SBOM file not found: $WORKSPACE_DIR/sbom-java-cyclonedx.json"
+            echo "⚠️  Java SBOM file not found: ${SBOM_DIR}/sbom-java-cyclonedx.json"
           fi
           
           echo ""
           
           # Upload Python SBOM (CycloneDX format)
-          if [ -f "$WORKSPACE_DIR/sbom-python-cyclonedx.json" ]; then
+          if [ -f "${SBOM_DIR}/sbom-python-cyclonedx.json" ]; then
             echo "Uploading Python SBOM (CycloneDX format)..."
             HTTP_CODE=$(curl -w "%{http_code}" -o /tmp/concert-sbom-python-response.json \
               -X POST "${CONCERT_URL}/core/api/v1/applications/demo-turbo-instana-concert/sbom" \
               -H "C_API_KEY: ${CONCERT_API_KEY}" \
               -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
               -H "Content-Type: application/json" \
-              --data-binary @"$WORKSPACE_DIR/sbom-python-cyclonedx.json")
+              --data-binary @"${SBOM_DIR}/sbom-python-cyclonedx.json")
             
             echo "HTTP Response Code: ${HTTP_CODE}"
             
@@ -860,7 +868,7 @@ jobs:
               cat /tmp/concert-sbom-python-response.json 2>/dev/null || true
             fi
           else
-            echo "⚠️  Python SBOM file not found: $WORKSPACE_DIR/sbom-python-cyclonedx.json"
+            echo "⚠️  Python SBOM file not found: ${SBOM_DIR}/sbom-python-cyclonedx.json"
           fi
           
           echo ""
