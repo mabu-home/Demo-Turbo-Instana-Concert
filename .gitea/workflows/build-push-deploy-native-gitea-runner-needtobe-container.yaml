@@ -463,20 +463,20 @@ jobs:
                 # Count by severity
                 echo "By severity:"
                 python3 -c "
-import json
-try:
-    with open('$JSON_FILE') as f:
-        data = json.load(f)
-    results = data.get('results', [])
-    counts = {}
-    for result in results:
-        severity = result.get('extra', {}).get('severity', 'UNKNOWN')
-        counts[severity] = counts.get(severity, 0) + 1
-    for k, v in sorted(counts.items()):
-        print(f'  {k}: {v}')
-except Exception as e:
-    print(f'  Error parsing results: {e}')
-" 2>/dev/null || echo "  Could not parse severity data"
+                import json
+                try:
+                    with open('$JSON_FILE') as f:
+                        data = json.load(f)
+                    results = data.get('results', [])
+                    counts = {}
+                    for result in results:
+                        severity = result.get('extra', {}).get('severity', 'UNKNOWN')
+                        counts[severity] = counts.get(severity, 0) + 1
+                    for k, v in sorted(counts.items()):
+                        print(f'  {k}: {v}')
+                except Exception as e:
+                    print(f'  Error parsing results: {e}')
+                " 2>/dev/null || echo "  Could not parse severity data"
               else
                 echo "  Python3 not available for summary parsing"
               fi
