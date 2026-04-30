@@ -577,16 +577,21 @@ jobs:
           cp "$SARIF_FILE" "$SARIF_JSON"
           echo "File: ${SARIF_JSON} (SARIF format)"
           
+          # Get repository info from Gitea context
+          REPO_URL="${{ gitea.server_url }}/${{ gitea.repository }}"
+          REPO_NAME="${{ gitea.repository }}"
+          
           # Use silent mode and only capture HTTP code (no progress output)
-          # Upload as multipart form data with data_type=vulnerability_scan
+          # Use data_type=static_code_scan (correct type for SAST scans)
           HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/concert-sast-response.json \
             -X POST "${CONCERT_URL}/ingestion/api/v1/upload_files" \
-            -H "Accept: application/json" \
+            -H "accept: application/json" \
             -H "Content-Type: multipart/form-data" \
             -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
             -H "Authorization: C_API_KEY ${CONCERT_API_KEY}" \
-            -F "data_type=vulnerability_scan" \
+            -F "data_type=static_code_scan" \
             -F "filename=@${SARIF_JSON}" \
+            -F "metadata={\"env_name\":\"prod\",\"repo_url\":\"${REPO_URL}\",\"repo_name\":\"${REPO_NAME}\",\"tool\":\"semgrep\",\"format\":\"sarif\"}" \
             --connect-timeout 10 \
             --max-time 60)
           
