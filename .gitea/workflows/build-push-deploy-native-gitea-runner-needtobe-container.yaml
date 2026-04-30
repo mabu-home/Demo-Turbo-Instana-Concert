@@ -322,7 +322,7 @@ jobs:
             docker run --rm \
               -v "$(pwd):/src" \
               returntocorp/semgrep:latest \
-              --config=auto \
+              semgrep --config=auto \
               --sarif \
               --output=/src/semgrep-results.sarif \
               /src/java-app/ /src/python-app/ || {
@@ -333,7 +333,7 @@ jobs:
             docker run --rm \
               -v "$(pwd):/src" \
               returntocorp/semgrep:latest \
-              --config=auto \
+              semgrep --config=auto \
               --json \
               --output=/src/semgrep-results.json \
               /src/java-app/ /src/python-app/ || {
