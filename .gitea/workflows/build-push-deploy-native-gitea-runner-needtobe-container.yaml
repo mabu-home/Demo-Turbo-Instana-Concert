@@ -260,7 +260,170 @@ jobs:
           docker info
           echo "✓ Docker is working"
 
-      # Step 3: Install kubectl
+      # Step 3: Run Semgrep SAST Scan
+      - name: Run Semgrep SAST Scan
+        run: |
+          echo "============================================"
+          echo "Running Semgrep SAST Security Scan"
+          echo "============================================"
+          
+          # Check if pip3 is available
+          if command -v pip3 &> /dev/null; then
+            echo "Installing Semgrep with pip3..."
+            pip3 install semgrep || {
+              echo "⚠️  Failed to install Semgrep, trying with --user flag"
+              pip3 install --user semgrep
+              export PATH="$HOME/.local/bin:$PATH"
+            }
+          else
+            echo "pip3 not available, using Docker-based Semgrep..."
+          fi
+          
+          # Verify Semgrep is available
+          if command -v semgrep &> /dev/null; then
+            echo "Using native Semgrep:"
+            semgrep --version
+          else
+            echo "Using Docker-based Semgrep"
+          fi
+          
+          # Run Semgrep scan on all code
+          echo ""
+          echo "Scanning java-app/ and python-app/ directories..."
+          echo "Application: demo-turbo-instana-concert"
+          echo ""
+          
+          # Run Semgrep with auto config (includes security rules)
+          # Generate both SARIF (for Concert) and JSON (for summary)
+          if command -v semgrep &> /dev/null; then
+            # Native Semgrep
+            echo "Running native Semgrep..."
+            semgrep --config=auto \
+              --sarif \
+              --output=semgrep-results.sarif \
+              java-app/ python-app/ || {
+              echo "⚠️  Semgrep SARIF scan failed, continuing..."
+            }
+            
+            semgrep --config=auto \
+              --json \
+              --output=semgrep-results.json \
+              java-app/ python-app/ || {
+              echo "⚠️  Semgrep JSON scan failed, continuing..."
+            }
+          else
+            # Docker-based Semgrep
+            echo "Running Docker-based Semgrep..."
+            echo "Current directory: $(pwd)"
+            echo "Files to scan:"
+            ls -la java-app/ python-app/
+            
+            # Run SARIF scan
+            docker run --rm \
+              -v "$(pwd):/src" \
+              returntocorp/semgrep:latest \
+              --config=auto \
+              --sarif \
+              --output=/src/semgrep-results.sarif \
+              /src/java-app/ /src/python-app/ || {
+              echo "⚠️  Semgrep SARIF scan failed, continuing..."
+            }
+            
+            # Run JSON scan
+            docker run --rm \
+              -v "$(pwd):/src" \
+              returntocorp/semgrep:latest \
+              --config=auto \
+              --json \
+              --output=/src/semgrep-results.json \
+              /src/java-app/ /src/python-app/ || {
+              echo "⚠️  Semgrep JSON scan failed, continuing..."
+            }
+          fi
+          
+          # Verify files were created
+          echo ""
+          echo "Checking for generated files..."
+          if [ -f semgrep-results.sarif ]; then
+            echo "✓ SARIF file created: $(ls -lh semgrep-results.sarif)"
+          else
+            echo "⚠️  SARIF file not found"
+          fi
+          
+          if [ -f semgrep-results.json ]; then
+            echo "✓ JSON file created: $(ls -lh semgrep-results.json)"
+          else
+            echo "⚠️  JSON file not found"
+          fi
+          
+          echo ""
+          echo "✓ Semgrep SAST scan completed"
+          
+          # Show summary if results exist
+          if [ -f semgrep-results.json ]; then
+            echo ""
+            echo "Scan Results Summary:"
+            echo "--------------------"
+            
+            # Count total findings
+            TOTAL_FINDINGS=$(python3 -c "import json; data=json.load(open('semgrep-results.json')); print(len(data.get('results', [])))" 2>/dev/null || echo "0")
+            echo "Total findings: ${TOTAL_FINDINGS}"
+            
+            # Count by severity
+            echo "By severity:"
+            python3 -c "import json; data=json.load(open('semgrep-results.json')); results=data.get('results',[]); counts={}; [counts.update({result.get('extra',{}).get('severity','UNKNOWN'): counts.get(result.get('extra',{}).get('severity','UNKNOWN'),0)+1}) for result in results]; [print(f'  {k}: {v}') for k,v in sorted(counts.items())]" 2>/dev/null || echo "  Could not parse severity data"
+          fi
+          
+          # List generated files
+          echo ""
+          echo "Generated files:"
+          ls -lh semgrep-results.* 2>/dev/null || echo "No result files found"
+          echo "============================================"
+
+      # Step 4: Upload Semgrep Results to Concert
+      - name: Upload Semgrep Results to Concert
+        if: secrets.CONCERT_URL != ''
+        continue-on-error: true
+        env:
+          CONCERT_URL: ${{ secrets.CONCERT_URL }}
+          CONCERT_API_KEY: ${{ secrets.CONCERT_API_KEY }}
+          CONCERT_INSTANCE_ID: ${{ secrets.CONCERT_INSTANCE_ID }}
+        run: |
+          echo "============================================"
+          echo "Uploading Semgrep SAST Results to Concert"
+          echo "============================================"
+          echo "Application: demo-turbo-instana-concert"
+          echo "Concert URL: ${CONCERT_URL}"
+          echo ""
+          
+          # Check if SARIF file exists
+          if [ ! -f semgrep-results.sarif ]; then
+            echo "⚠️  No SARIF results file found, skipping upload"
+            exit 0
+          fi
+          
+          # Upload SARIF results to Concert
+          echo "Uploading SAST results..."
+          HTTP_CODE=$(curl -w "%{http_code}" -o /tmp/concert-sast-response.json \
+            -X POST "${CONCERT_URL}/core/api/v1/applications/demo-turbo-instana-concert/sast_results" \
+            -H "C_API_KEY: ${CONCERT_API_KEY}" \
+            -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
+            -H "Content-Type: application/sarif+json" \
+            --data-binary @semgrep-results.sarif)
+          
+          echo "HTTP Response Code: ${HTTP_CODE}"
+          
+          if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
+            echo "✓ Semgrep SAST results uploaded successfully to Concert"
+            cat /tmp/concert-sast-response.json 2>/dev/null || true
+          else
+            echo "⚠️  Concert SAST upload failed with HTTP ${HTTP_CODE}"
+            cat /tmp/concert-sast-response.json 2>/dev/null || true
+            echo "Note: This is non-blocking, continuing workflow..."
+          fi
+          echo "============================================"
+
+      # Step 5: Install kubectl
       - name: Install kubectl
         run: |
           echo "Installing kubectl..."
@@ -371,7 +534,7 @@ jobs:
           $DOCKER_BIN info
           echo "✓ Docker is available and working"
 
-      # Step 5: Verify kubectl is available
+      # Step 6: Verify kubectl is available
       - name: Verify kubectl
         run: |
           echo "Checking for kubectl..."
@@ -399,7 +562,7 @@ jobs:
           $KUBECTL_BIN version --client
           echo "✓ kubectl is available and working"
 
-      # Step 6: Configure Docker for HTTP Registry
+      # Step 7: Configure Docker for HTTP Registry
       - name: Configure Docker for HTTP Registry
         run: |
           echo "Configuring Docker to allow insecure registry..."
@@ -446,7 +609,7 @@ jobs:
           
           echo "✓ Docker configured for HTTP registry: ${REGISTRY}"
 
-      # Step 7: Login to Registry
+      # Step 8: Login to Registry
       - name: Login to Gitea Registry
         run: |
           # Wait for Docker daemon to fully restart after config change
