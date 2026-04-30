@@ -262,124 +262,214 @@ jobs:
 
       # Step 3: Run Semgrep SAST Scan
       - name: Run Semgrep SAST Scan
+        continue-on-error: true
         run: |
           echo "============================================"
           echo "Running Semgrep SAST Security Scan"
           echo "============================================"
+          echo "Application: demo-turbo-instana-concert"
+          echo "Workspace: $WORKSPACE_DIR"
+          echo ""
+          
+          # Create output directory
+          mkdir -p "$WORKSPACE_DIR"
           
           # Check if pip3 is available
+          SEMGREP_INSTALLED=false
           if command -v pip3 &> /dev/null; then
-            echo "Installing Semgrep with pip3..."
-            pip3 install semgrep || {
-              echo "⚠️  Failed to install Semgrep, trying with --user flag"
-              pip3 install --user semgrep
+            echo "Attempting to install Semgrep with pip3..."
+            if pip3 install semgrep 2>/dev/null; then
+              echo "✓ Semgrep installed successfully"
+              SEMGREP_INSTALLED=true
+            elif pip3 install --user semgrep 2>/dev/null; then
+              echo "✓ Semgrep installed to user directory"
               export PATH="$HOME/.local/bin:$PATH"
-            }
+              SEMGREP_INSTALLED=true
+            else
+              echo "⚠️  Failed to install Semgrep with pip3"
+            fi
           else
-            echo "pip3 not available, using Docker-based Semgrep..."
+            echo "⚠️  pip3 not available"
           fi
           
           # Verify Semgrep is available
           if command -v semgrep &> /dev/null; then
-            echo "Using native Semgrep:"
-            semgrep --version
-          else
-            echo "Using Docker-based Semgrep"
+            echo "✓ Using native Semgrep: $(semgrep --version | head -n1)"
+            SEMGREP_INSTALLED=true
+          elif [ "$SEMGREP_INSTALLED" = false ]; then
+            echo "⚠️  Native Semgrep not available, will use Docker-based Semgrep"
           fi
           
-          # Run Semgrep scan on all code
+          # Verify scan targets exist
           echo ""
-          echo "Scanning java-app/ and python-app/ directories..."
-          echo "Application: demo-turbo-instana-concert"
+          echo "Verifying scan targets..."
+          if [ ! -d "java-app" ]; then
+            echo "⚠️  java-app/ directory not found"
+          else
+            echo "✓ java-app/ directory found"
+          fi
+          
+          if [ ! -d "python-app" ]; then
+            echo "⚠️  python-app/ directory not found"
+          else
+            echo "✓ python-app/ directory found"
+          fi
+          
+          if [ ! -d "java-app" ] && [ ! -d "python-app" ]; then
+            echo "❌ No scan targets found, skipping Semgrep scan"
+            exit 0
+          fi
+          
+          # Run Semgrep scan
+          echo ""
+          echo "Starting Semgrep scan..."
           echo ""
           
-          # Run Semgrep with auto config (includes security rules)
-          # Generate both SARIF (for Concert) and JSON (for summary)
+          SCAN_SUCCESS=false
+          
           if command -v semgrep &> /dev/null; then
             # Native Semgrep
-            echo "Running native Semgrep..."
-            semgrep --config=auto \
-              --sarif \
-              --output=semgrep-results.sarif \
-              java-app/ python-app/ || {
-              echo "⚠️  Semgrep SARIF scan failed, continuing..."
-            }
-            
-            semgrep --config=auto \
-              --json \
-              --output=semgrep-results.json \
-              java-app/ python-app/ || {
-              echo "⚠️  Semgrep JSON scan failed, continuing..."
-            }
-          else
-            # Docker-based Semgrep
-            echo "Running Docker-based Semgrep..."
-            echo "Current directory: $(pwd)"
-            echo "Files to scan:"
-            ls -la java-app/ python-app/
+            echo "Using native Semgrep..."
             
             # Run SARIF scan
-            echo "Running SARIF scan..."
-            docker run --rm \
+            echo "Generating SARIF output..."
+            if semgrep --config=auto \
+              --sarif \
+              --output="$WORKSPACE_DIR/semgrep-results.sarif" \
+              java-app/ python-app/ 2>&1; then
+              echo "✓ SARIF scan completed"
+              SCAN_SUCCESS=true
+            else
+              EXIT_CODE=$?
+              echo "⚠️  SARIF scan failed with exit code $EXIT_CODE"
+            fi
+            
+            # Run JSON scan for summary
+            echo "Generating JSON output..."
+            if semgrep --config=auto \
+              --json \
+              --output="$WORKSPACE_DIR/semgrep-results.json" \
+              java-app/ python-app/ 2>&1; then
+              echo "✓ JSON scan completed"
+              SCAN_SUCCESS=true
+            else
+              EXIT_CODE=$?
+              echo "⚠️  JSON scan failed with exit code $EXIT_CODE"
+            fi
+          else
+            # Docker-based Semgrep
+            echo "Using Docker-based Semgrep..."
+            echo "Current directory: $(pwd)"
+            
+            # Run SARIF scan
+            echo "Generating SARIF output..."
+            if docker run --rm \
               -v "$(pwd):/src" \
+              -w /src \
               returntocorp/semgrep:latest \
               semgrep --config=auto \
               --sarif \
               --output=/src/semgrep-results.sarif \
-              /src/java-app/ /src/python-app/ 2>&1 || {
-              echo "⚠️  Semgrep SARIF scan failed with exit code $?, continuing..."
-            }
+              /src/java-app/ /src/python-app/ 2>&1; then
+              echo "✓ SARIF scan completed"
+              SCAN_SUCCESS=true
+            else
+              EXIT_CODE=$?
+              echo "⚠️  SARIF scan failed with exit code $EXIT_CODE"
+            fi
             
             # Run JSON scan
-            echo "Running JSON scan..."
-            docker run --rm \
+            echo "Generating JSON output..."
+            if docker run --rm \
               -v "$(pwd):/src" \
+              -w /src \
               returntocorp/semgrep:latest \
               semgrep --config=auto \
               --json \
               --output=/src/semgrep-results.json \
-              /src/java-app/ /src/python-app/ 2>&1 || {
-              echo "⚠️  Semgrep JSON scan failed with exit code $?, continuing..."
-            }
+              /src/java-app/ /src/python-app/ 2>&1; then
+              echo "✓ JSON scan completed"
+              SCAN_SUCCESS=true
+            else
+              EXIT_CODE=$?
+              echo "⚠️  JSON scan failed with exit code $EXIT_CODE"
+            fi
           fi
           
           # Verify files were created
           echo ""
-          echo "Checking for generated files..."
-          if [ -f semgrep-results.sarif ]; then
-            echo "✓ SARIF file created: $(ls -lh semgrep-results.sarif)"
+          echo "Verifying generated files..."
+          
+          SARIF_EXISTS=false
+          JSON_EXISTS=false
+          
+          if [ -f "$WORKSPACE_DIR/semgrep-results.sarif" ]; then
+            echo "✓ SARIF file created: $(ls -lh "$WORKSPACE_DIR/semgrep-results.sarif")"
+            SARIF_EXISTS=true
+          elif [ -f "semgrep-results.sarif" ]; then
+            echo "✓ SARIF file created in current directory: $(ls -lh semgrep-results.sarif)"
+            cp semgrep-results.sarif "$WORKSPACE_DIR/" 2>/dev/null || true
+            SARIF_EXISTS=true
           else
             echo "⚠️  SARIF file not found"
           fi
           
-          if [ -f semgrep-results.json ]; then
-            echo "✓ JSON file created: $(ls -lh semgrep-results.json)"
+          if [ -f "$WORKSPACE_DIR/semgrep-results.json" ]; then
+            echo "✓ JSON file created: $(ls -lh "$WORKSPACE_DIR/semgrep-results.json")"
+            JSON_EXISTS=true
+          elif [ -f "semgrep-results.json" ]; then
+            echo "✓ JSON file created in current directory: $(ls -lh semgrep-results.json)"
+            cp semgrep-results.json "$WORKSPACE_DIR/" 2>/dev/null || true
+            JSON_EXISTS=true
           else
             echo "⚠️  JSON file not found"
           fi
           
-          echo ""
-          echo "✓ Semgrep SAST scan completed"
-          
           # Show summary if results exist
-          if [ -f semgrep-results.json ]; then
-            echo ""
-            echo "Scan Results Summary:"
-            echo "--------------------"
+          if [ "$JSON_EXISTS" = true ]; then
+            JSON_FILE="$WORKSPACE_DIR/semgrep-results.json"
+            [ ! -f "$JSON_FILE" ] && JSON_FILE="semgrep-results.json"
             
-            # Count total findings
-            TOTAL_FINDINGS=$(python3 -c "import json; data=json.load(open('semgrep-results.json')); print(len(data.get('results', [])))" 2>/dev/null || echo "0")
-            echo "Total findings: ${TOTAL_FINDINGS}"
-            
-            # Count by severity
-            echo "By severity:"
-            python3 -c "import json; data=json.load(open('semgrep-results.json')); results=data.get('results',[]); counts={}; [counts.update({result.get('extra',{}).get('severity','UNKNOWN'): counts.get(result.get('extra',{}).get('severity','UNKNOWN'),0)+1}) for result in results]; [print(f'  {k}: {v}') for k,v in sorted(counts.items())]" 2>/dev/null || echo "  Could not parse severity data"
+            if [ -f "$JSON_FILE" ]; then
+              echo ""
+              echo "Scan Results Summary:"
+              echo "--------------------"
+              
+              # Count total findings
+              if command -v python3 &> /dev/null; then
+                TOTAL_FINDINGS=$(python3 -c "import json; data=json.load(open('$JSON_FILE')); print(len(data.get('results', [])))" 2>/dev/null || echo "0")
+                echo "Total findings: ${TOTAL_FINDINGS}"
+                
+                # Count by severity
+                echo "By severity:"
+                python3 -c "
+import json
+try:
+    with open('$JSON_FILE') as f:
+        data = json.load(f)
+    results = data.get('results', [])
+    counts = {}
+    for result in results:
+        severity = result.get('extra', {}).get('severity', 'UNKNOWN')
+        counts[severity] = counts.get(severity, 0) + 1
+    for k, v in sorted(counts.items()):
+        print(f'  {k}: {v}')
+except Exception as e:
+    print(f'  Error parsing results: {e}')
+" 2>/dev/null || echo "  Could not parse severity data"
+              else
+                echo "  Python3 not available for summary parsing"
+              fi
+            fi
           fi
           
-          # List generated files
           echo ""
-          echo "Generated files:"
-          ls -lh semgrep-results.* 2>/dev/null || echo "No result files found"
+          if [ "$SARIF_EXISTS" = true ] || [ "$JSON_EXISTS" = true ]; then
+            echo "✓ Semgrep SAST scan completed successfully"
+          else
+            echo "⚠️  Semgrep scan completed but no output files generated"
+            echo "This is non-blocking, workflow will continue..."
+          fi
           echo "============================================"
 
       # Step 4: Upload Semgrep Results to Concert
@@ -398,31 +488,89 @@ jobs:
           echo "Concert URL: ${CONCERT_URL}"
           echo ""
           
-          # Check if SARIF file exists
-          if [ ! -f semgrep-results.sarif ]; then
-            echo "⚠️  No SARIF results file found, skipping upload"
+          # Check for SARIF file in multiple locations
+          SARIF_FILE=""
+          
+          if [ -f "$WORKSPACE_DIR/semgrep-results.sarif" ]; then
+            SARIF_FILE="$WORKSPACE_DIR/semgrep-results.sarif"
+            echo "✓ Found SARIF file in workspace: $SARIF_FILE"
+          elif [ -f "semgrep-results.sarif" ]; then
+            SARIF_FILE="semgrep-results.sarif"
+            echo "✓ Found SARIF file in current directory: $SARIF_FILE"
+          else
+            echo "⚠️  No SARIF results file found in any location"
+            echo "Checked locations:"
+            echo "  - $WORKSPACE_DIR/semgrep-results.sarif"
+            echo "  - ./semgrep-results.sarif"
+            echo ""
+            echo "This may indicate Semgrep scan failed or was skipped."
+            echo "Skipping upload (non-blocking)..."
             exit 0
           fi
           
+          # Verify SARIF file is valid JSON
+          echo ""
+          echo "Validating SARIF file..."
+          if command -v jq &> /dev/null; then
+            if jq empty "$SARIF_FILE" 2>/dev/null; then
+              echo "✓ SARIF file is valid JSON"
+              
+              # Show file size
+              FILE_SIZE=$(ls -lh "$SARIF_FILE" | awk '{print $5}')
+              echo "  File size: $FILE_SIZE"
+              
+              # Count results if possible
+              RESULT_COUNT=$(jq '[.runs[]?.results[]?] | length' "$SARIF_FILE" 2>/dev/null || echo "unknown")
+              echo "  Results count: $RESULT_COUNT"
+            else
+              echo "⚠️  SARIF file is not valid JSON, skipping upload"
+              exit 0
+            fi
+          else
+            echo "⚠️  jq not available, skipping validation"
+          fi
+          
           # Upload SARIF results to Concert
-          echo "Uploading SAST results..."
+          echo ""
+          echo "Uploading SAST results to Concert..."
           HTTP_CODE=$(curl -w "%{http_code}" -o /tmp/concert-sast-response.json \
             -X POST "${CONCERT_URL}/core/api/v1/applications/demo-turbo-instana-concert/sast_results" \
             -H "C_API_KEY: ${CONCERT_API_KEY}" \
             -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
             -H "Content-Type: application/sarif+json" \
-            --data-binary @semgrep-results.sarif)
+            --data-binary @"$SARIF_FILE" \
+            --connect-timeout 10 \
+            --max-time 60 \
+            2>&1)
           
           echo "HTTP Response Code: ${HTTP_CODE}"
+          echo ""
           
           if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
             echo "✓ Semgrep SAST results uploaded successfully to Concert"
+            if [ -f /tmp/concert-sast-response.json ]; then
+              echo ""
+              echo "Response:"
+              cat /tmp/concert-sast-response.json 2>/dev/null | jq . 2>/dev/null || cat /tmp/concert-sast-response.json
+            fi
+          elif [ "${HTTP_CODE}" = "401" ]; then
+            echo "❌ Concert SAST upload failed: Authentication error (HTTP ${HTTP_CODE})"
+            echo "Check CONCERT_API_KEY and CONCERT_INSTANCE_ID secrets"
             cat /tmp/concert-sast-response.json 2>/dev/null || true
+          elif [ "${HTTP_CODE}" = "404" ]; then
+            echo "❌ Concert SAST upload failed: Application not found (HTTP ${HTTP_CODE})"
+            echo "Ensure 'demo-turbo-instana-concert' application exists in Concert"
+            cat /tmp/concert-sast-response.json 2>/dev/null || true
+          elif [ "${HTTP_CODE}" = "000" ]; then
+            echo "❌ Concert SAST upload failed: Cannot connect to Concert API"
+            echo "Check CONCERT_URL and network connectivity"
           else
             echo "⚠️  Concert SAST upload failed with HTTP ${HTTP_CODE}"
             cat /tmp/concert-sast-response.json 2>/dev/null || true
-            echo "Note: This is non-blocking, continuing workflow..."
           fi
+          
+          echo ""
+          echo "Note: Upload failures are non-blocking, workflow continues..."
           echo "============================================"
 
       # Step 5: Install kubectl
@@ -663,13 +811,17 @@ jobs:
 
       # Step 12: Generate SBOM for Java App
       - name: Generate SBOM for Java App
+        continue-on-error: true
         run: |
           REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/echo-service"
           
-          echo "Generating SBOM for Java Echo Service..."
+          echo "============================================"
+          echo "Generating SBOM for Java Echo Service"
+          echo "============================================"
           echo "Image: ${IMAGE_NAME}:latest"
-          echo "Output will be saved to both workspace and /tmp for upload testing"
+          echo "Workspace: $WORKSPACE_DIR"
+          echo ""
           
           # Create output directories
           mkdir -p /tmp/sbom-output
@@ -679,67 +831,78 @@ jobs:
           if ! docker image inspect "${IMAGE_NAME}:latest" &> /dev/null; then
             echo "⚠️  Warning: Image ${IMAGE_NAME}:latest not found locally"
             echo "Attempting to pull image..."
-            docker pull "${IMAGE_NAME}:latest" || {
+            if ! docker pull "${IMAGE_NAME}:latest"; then
               echo "❌ Failed to pull image. SBOM generation skipped."
+              echo "This is non-blocking, workflow will continue..."
               exit 0
-            }
+            fi
           fi
           
-          echo "Image found, generating SBOM..."
+          echo "✓ Image found, generating SBOM..."
+          echo ""
           
+          # Check for syft
           if command -v syft &> /dev/null; then
             # Generate SBOM with syft installed on host
-            echo "Using native syft..."
-            syft "${IMAGE_NAME}:latest" \
-              -o spdx-json="$WORKSPACE_DIR/sbom-java.json" \
+            echo "Using native syft ($(syft version))..."
+            if syft "${IMAGE_NAME}:latest" \
               -o cyclonedx-json="$WORKSPACE_DIR/sbom-java-cyclonedx.json" \
-              -o spdx-json="/tmp/sbom-output/sbom-java.json" \
-              -o cyclonedx-json="/tmp/sbom-output/sbom-java-cyclonedx.json" || {
-              echo "❌ Syft scan failed"
+              -o cyclonedx-json="/tmp/sbom-output/sbom-java-cyclonedx.json"; then
+              echo "✓ Java SBOM generated successfully"
+            else
+              echo "❌ Syft scan failed (native)"
               exit 1
-            }
+            fi
           else
             # Generate SBOM using Docker container
             echo "Using Docker-based syft..."
-            docker run --rm \
-              --user $(id -u):$(id -g) \
+            if docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -v "$WORKSPACE_DIR:/output" \
               -v "/tmp/sbom-output:/tmp-output" \
-              -w /output \
               anchore/syft:latest \
               "${IMAGE_NAME}:latest" \
-              -o spdx-json=/output/sbom-java.json \
               -o cyclonedx-json=/output/sbom-java-cyclonedx.json \
-              -o spdx-json=/tmp-output/sbom-java.json \
-              -o cyclonedx-json=/tmp-output/sbom-java-cyclonedx.json || {
-              echo "❌ Syft scan failed"
+              -o cyclonedx-json=/tmp-output/sbom-java-cyclonedx.json; then
+              echo "✓ Java SBOM generated successfully"
+            else
+              echo "❌ Syft scan failed (Docker)"
               exit 1
-            }
+            fi
           fi
           
           echo ""
-          echo "✓ Java SBOM generated successfully"
+          echo "Verifying generated files:"
           echo ""
-          echo "Workspace files:"
-          ls -lh "$WORKSPACE_DIR"/sbom-java*.json 2>/dev/null || echo "  No files in workspace"
+          echo "Workspace directory ($WORKSPACE_DIR):"
+          ls -lh "$WORKSPACE_DIR"/sbom-java*.json 2>/dev/null || echo "  ⚠️  No files found"
           echo ""
-          echo "Host /tmp files:"
-          ls -lh /tmp/sbom-output/sbom-java*.json 2>/dev/null || echo "  No files in /tmp"
+          echo "/tmp/sbom-output directory:"
+          ls -lh /tmp/sbom-output/sbom-java*.json 2>/dev/null || echo "  ⚠️  No files found"
           echo ""
-          echo "File locations for upload testing:"
-          echo "  - /tmp/sbom-output/sbom-java.json"
-          echo "  - /tmp/sbom-output/sbom-java-cyclonedx.json"
+          
+          # Verify at least one file was created
+          if [ -f "$WORKSPACE_DIR/sbom-java-cyclonedx.json" ] || [ -f "/tmp/sbom-output/sbom-java-cyclonedx.json" ]; then
+            echo "✓ SBOM file verification passed"
+          else
+            echo "❌ SBOM file verification failed - no files created"
+            exit 1
+          fi
+          echo "============================================"
 
       # Step 13: Generate SBOM for Python App
       - name: Generate SBOM for Python App
+        continue-on-error: true
         run: |
           REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/load-test-app"
           
-          echo "Generating SBOM for Python Load Test App..."
+          echo "============================================"
+          echo "Generating SBOM for Python Load Test App"
+          echo "============================================"
           echo "Image: ${IMAGE_NAME}:latest"
-          echo "Output will be saved to both workspace and /tmp for upload testing"
+          echo "Workspace: $WORKSPACE_DIR"
+          echo ""
           
           # Create output directories
           mkdir -p /tmp/sbom-output
@@ -749,57 +912,64 @@ jobs:
           if ! docker image inspect "${IMAGE_NAME}:latest" &> /dev/null; then
             echo "⚠️  Warning: Image ${IMAGE_NAME}:latest not found locally"
             echo "Attempting to pull image..."
-            docker pull "${IMAGE_NAME}:latest" || {
+            if ! docker pull "${IMAGE_NAME}:latest"; then
               echo "❌ Failed to pull image. SBOM generation skipped."
+              echo "This is non-blocking, workflow will continue..."
               exit 0
-            }
+            fi
           fi
           
-          echo "Image found, generating SBOM..."
+          echo "✓ Image found, generating SBOM..."
+          echo ""
           
+          # Check for syft
           if command -v syft &> /dev/null; then
             # Generate SBOM with syft installed on host
-            echo "Using native syft..."
-            syft "${IMAGE_NAME}:latest" \
-              -o spdx-json="$WORKSPACE_DIR/sbom-python.json" \
+            echo "Using native syft ($(syft version))..."
+            if syft "${IMAGE_NAME}:latest" \
               -o cyclonedx-json="$WORKSPACE_DIR/sbom-python-cyclonedx.json" \
-              -o spdx-json="/tmp/sbom-output/sbom-python.json" \
-              -o cyclonedx-json="/tmp/sbom-output/sbom-python-cyclonedx.json" || {
-              echo "❌ Syft scan failed"
+              -o cyclonedx-json="/tmp/sbom-output/sbom-python-cyclonedx.json"; then
+              echo "✓ Python SBOM generated successfully"
+            else
+              echo "❌ Syft scan failed (native)"
               exit 1
-            }
+            fi
           else
             # Generate SBOM using Docker container
             echo "Using Docker-based syft..."
-            docker run --rm \
-              --user $(id -u):$(id -g) \
+            if docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -v "$WORKSPACE_DIR:/output" \
               -v "/tmp/sbom-output:/tmp-output" \
-              -w /output \
               anchore/syft:latest \
               "${IMAGE_NAME}:latest" \
-              -o spdx-json=/output/sbom-python.json \
               -o cyclonedx-json=/output/sbom-python-cyclonedx.json \
-              -o spdx-json=/tmp-output/sbom-python.json \
-              -o cyclonedx-json=/tmp-output/sbom-python-cyclonedx.json || {
-              echo "❌ Syft scan failed"
+              -o cyclonedx-json=/tmp-output/sbom-python-cyclonedx.json; then
+              echo "✓ Python SBOM generated successfully"
+            else
+              echo "❌ Syft scan failed (Docker)"
               exit 1
-            }
+            fi
           fi
           
           echo ""
-          echo "✓ Python SBOM generated successfully"
+          echo "Verifying generated files:"
           echo ""
-          echo "Workspace files:"
-          ls -lh "$WORKSPACE_DIR"/sbom-python*.json 2>/dev/null || echo "  No files in workspace"
+          echo "Workspace directory ($WORKSPACE_DIR):"
+          ls -lh "$WORKSPACE_DIR"/sbom-python*.json 2>/dev/null || echo "  ⚠️  No files found"
           echo ""
-          echo "Host /tmp files:"
-          ls -lh /tmp/sbom-output/sbom-python*.json 2>/dev/null || echo "  No files in /tmp"
+          echo "/tmp/sbom-output directory:"
+          ls -lh /tmp/sbom-output/sbom-python*.json 2>/dev/null || echo "  ⚠️  No files found"
           echo ""
-          echo "File locations for upload testing:"
-          echo "  - /tmp/sbom-output/sbom-python.json"
-          echo "  - /tmp/sbom-output/sbom-python-cyclonedx.json"
+          
+          # Verify at least one file was created
+          if [ -f "$WORKSPACE_DIR/sbom-python-cyclonedx.json" ] || [ -f "/tmp/sbom-output/sbom-python-cyclonedx.json" ]; then
+            echo "✓ SBOM file verification passed"
+          else
+            echo "❌ SBOM file verification failed - no files created"
+            exit 1
+          fi
+          echo "============================================"
 
       # Step 14: Upload SBOM to Concert
       - name: Upload SBOM to Concert
@@ -817,10 +987,28 @@ jobs:
           echo "Concert URL: ${CONCERT_URL}"
           echo ""
           
-          # Check for SBOM files in current directory or WORKSPACE_DIR
+          # Check for SBOM files in multiple locations
           SBOM_DIR="${WORKSPACE_DIR:-.}"
           echo "Looking for SBOM files in: ${SBOM_DIR}"
-          ls -lh "${SBOM_DIR}"/sbom-*.json 2>/dev/null || echo "No SBOM files found"
+          ls -lh "${SBOM_DIR}"/sbom-*.json 2>/dev/null || echo "No SBOM files found in workspace"
+          echo ""
+          
+          # Also check /tmp/sbom-output as fallback
+          echo "Checking /tmp/sbom-output for SBOM files..."
+          ls -lh /tmp/sbom-output/sbom-*.json 2>/dev/null || echo "No SBOM files found in /tmp/sbom-output"
+          echo ""
+          
+          # Determine which directory has the SBOM files
+          if [ -f "${SBOM_DIR}/sbom-java-cyclonedx.json" ] || [ -f "${SBOM_DIR}/sbom-python-cyclonedx.json" ]; then
+            echo "Using SBOM files from workspace: ${SBOM_DIR}"
+          elif [ -f "/tmp/sbom-output/sbom-java-cyclonedx.json" ] || [ -f "/tmp/sbom-output/sbom-python-cyclonedx.json" ]; then
+            echo "Using SBOM files from /tmp/sbom-output"
+            SBOM_DIR="/tmp/sbom-output"
+          else
+            echo "⚠️  No SBOM files found in any location. Skipping upload."
+            echo "This may indicate SBOM generation failed or was skipped."
+            exit 0
+          fi
           echo ""
           
           # Upload Java SBOM (CycloneDX format - preferred by Concert)

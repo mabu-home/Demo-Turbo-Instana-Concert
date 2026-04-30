@@ -57,11 +57,13 @@ make status
 │   └── hpa.yaml
 ├── scripts/                    # Deployment & patch scripts
 │   ├── deploy.sh
-│   └── apply-concert-patch.sh
+│   ├── apply-concert-patch.sh
+│   └── diagnose-sbom.sh            # SBOM troubleshooting tool
 ├── concert-patches/            # IBM Concert remediation patches
 ├── docs/                       # Documentation
 │   ├── CONCERT_INTEGRATION.md      # Concert SAST & SBOM setup
 │   ├── CONCERT_SECRETS_SETUP.md    # Quick secrets configuration
+│   ├── SBOM_TROUBLESHOOTING.md     # SBOM upload troubleshooting
 │   └── GITEA_DEPLOYMENT_GUIDE.md   # Gitea CI/CD setup
 ├── Makefile                    # Build + push + deploy shortcuts
 └── README.md
@@ -134,6 +136,32 @@ All security data is uploaded to the `demo-turbo-instana-concert` application in
 **Setup Guide**: See [docs/CONCERT_INTEGRATION.md](docs/CONCERT_INTEGRATION.md) for detailed configuration.
 
 **Quick Start**: See [docs/CONCERT_SECRETS_SETUP.md](docs/CONCERT_SECRETS_SETUP.md) for secrets configuration.
+
+**Troubleshooting**: See [docs/SBOM_TROUBLESHOOTING.md](docs/SBOM_TROUBLESHOOTING.md) if SBOM upload fails.
+
+### Troubleshooting SBOM Upload
+
+If you see "No SBOM files found" in the workflow logs:
+
+```bash
+# Run the diagnostic tool
+bash scripts/diagnose-sbom.sh
+
+# Or manually check:
+# 1. Verify Docker images exist
+docker images | grep echo-service
+docker images | grep load-test-app
+
+# 2. Test SBOM generation manually
+syft <image>:latest -o cyclonedx-json=/tmp/test-sbom.json
+
+# 3. Check Concert connectivity
+curl -X GET "${CONCERT_URL}/core/api/v1/applications" \
+  -H "C_API_KEY: ${CONCERT_API_KEY}" \
+  -H "InstanceID: ${CONCERT_INSTANCE_ID}"
+```
+
+For detailed troubleshooting steps, see [docs/SBOM_TROUBLESHOOTING.md](docs/SBOM_TROUBLESHOOTING.md).
 
 ### Required Secrets (Gitea)
 ```bash
