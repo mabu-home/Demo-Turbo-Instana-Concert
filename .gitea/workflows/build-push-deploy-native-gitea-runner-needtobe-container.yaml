@@ -1085,20 +1085,23 @@ jobs:
           fi
           echo ""
           
-          # Upload Java SBOM (CycloneDX format - preferred by Concert)
+          # Upload Java SBOM using Concert Ingestion API (multipart form data)
           if [ -f "${SBOM_DIR}/sbom-java-cyclonedx.json" ]; then
             echo "Uploading Java SBOM (CycloneDX format)..."
+            echo "Using Concert Ingestion API: ${CONCERT_URL}/ingestion/api/v1/upload_files"
+            
             HTTP_CODE=$(curl -w "%{http_code}" -o /tmp/concert-sbom-java-response.json \
-              -X POST "${CONCERT_URL}/core/api/v1/applications/demo-turbo-instana-concert/sbom" \
-              -H "C_API_KEY: ${CONCERT_API_KEY}" \
+              -X POST "${CONCERT_URL}/ingestion/api/v1/upload_files" \
+              -H "accept: application/json" \
               -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
-              -H "Content-Type: application/json" \
-              --data-binary @"${SBOM_DIR}/sbom-java-cyclonedx.json")
+              -H "Authorization: C_API_KEY ${CONCERT_API_KEY}" \
+              -F "data_type=package_sbom" \
+              -F "filename=@${SBOM_DIR}/sbom-java-cyclonedx.json")
             
             echo "HTTP Response Code: ${HTTP_CODE}"
             
             if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
-              echo "✓ Java SBOM uploaded successfully"
+              echo "✓ Java SBOM uploaded successfully to Concert"
               cat /tmp/concert-sbom-java-response.json 2>/dev/null || true
             else
               echo "⚠️  Java SBOM upload failed with HTTP ${HTTP_CODE}"
@@ -1110,20 +1113,23 @@ jobs:
           
           echo ""
           
-          # Upload Python SBOM (CycloneDX format)
+          # Upload Python SBOM using Concert Ingestion API (multipart form data)
           if [ -f "${SBOM_DIR}/sbom-python-cyclonedx.json" ]; then
             echo "Uploading Python SBOM (CycloneDX format)..."
+            echo "Using Concert Ingestion API: ${CONCERT_URL}/ingestion/api/v1/upload_files"
+            
             HTTP_CODE=$(curl -w "%{http_code}" -o /tmp/concert-sbom-python-response.json \
-              -X POST "${CONCERT_URL}/core/api/v1/applications/demo-turbo-instana-concert/sbom" \
-              -H "C_API_KEY: ${CONCERT_API_KEY}" \
+              -X POST "${CONCERT_URL}/ingestion/api/v1/upload_files" \
+              -H "accept: application/json" \
               -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
-              -H "Content-Type: application/json" \
-              --data-binary @"${SBOM_DIR}/sbom-python-cyclonedx.json")
+              -H "Authorization: C_API_KEY ${CONCERT_API_KEY}" \
+              -F "data_type=package_sbom" \
+              -F "filename=@${SBOM_DIR}/sbom-python-cyclonedx.json")
             
             echo "HTTP Response Code: ${HTTP_CODE}"
             
             if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
-              echo "✓ Python SBOM uploaded successfully"
+              echo "✓ Python SBOM uploaded successfully to Concert"
               cat /tmp/concert-sbom-python-response.json 2>/dev/null || true
             else
               echo "⚠️  Python SBOM upload failed with HTTP ${HTTP_CODE}"
