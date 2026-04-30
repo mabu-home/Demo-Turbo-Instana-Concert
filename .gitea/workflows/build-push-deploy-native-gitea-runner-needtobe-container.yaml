@@ -185,32 +185,14 @@ jobs:
             echo ""
             echo "Scan Results Summary:"
             echo "--------------------"
-            python3 << 'PYTHON_SCRIPT'
-import sys, json
-try:
-    with open('semgrep-results.json', 'r') as f:
-        data = json.load(f)
-        results = data.get('results', [])
-        errors = data.get('errors', [])
-        
-        print(f'Total findings: {len(results)}')
-        
-        # Count by severity
-        severity_counts = {}
-        for result in results:
-            severity = result.get('extra', {}).get('severity', 'UNKNOWN')
-            severity_counts[severity] = severity_counts.get(severity, 0) + 1
-        
-        if severity_counts:
-            print('By severity:')
-            for severity, count in sorted(severity_counts.items()):
-                print(f'  {severity}: {count}')
-        
-        if errors:
-            print(f'Scan errors: {len(errors)}')
-except Exception as e:
-    print(f'Could not parse results: {e}')
-PYTHON_SCRIPT
+            
+            # Count total findings
+            TOTAL_FINDINGS=$(python3 -c "import json; data=json.load(open('semgrep-results.json')); print(len(data.get('results', [])))" 2>/dev/null || echo "0")
+            echo "Total findings: ${TOTAL_FINDINGS}"
+            
+            # Count by severity
+            echo "By severity:"
+            python3 -c "import json; data=json.load(open('semgrep-results.json')); results=data.get('results',[]); counts={}; [counts.update({result.get('extra',{}).get('severity','UNKNOWN'): counts.get(result.get('extra',{}).get('severity','UNKNOWN'),0)+1}) for result in results]; [print(f'  {k}: {v}') for k,v in sorted(counts.items())]" 2>/dev/null || echo "  Could not parse severity data"
           fi
           
           # List generated files
