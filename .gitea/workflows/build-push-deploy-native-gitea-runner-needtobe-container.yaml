@@ -148,16 +148,27 @@ jobs:
           echo "Running Semgrep SAST Security Scan"
           echo "============================================"
           
-          # Install Semgrep
-          echo "Installing Semgrep..."
-          pip3 install semgrep || {
-            echo "⚠️  Failed to install Semgrep, trying with --user flag"
-            pip3 install --user semgrep
-            export PATH="$HOME/.local/bin:$PATH"
-          }
+          # Check if pip3 is available
+          if command -v pip3 &> /dev/null; then
+            echo "Installing Semgrep with pip3..."
+            pip3 install semgrep || {
+              echo "⚠️  Failed to install Semgrep, trying with --user flag"
+              pip3 install --user semgrep
+              export PATH="$HOME/.local/bin:$PATH"
+            }
+            SEMGREP_CMD="semgrep"
+          else
+            echo "pip3 not available, using Docker-based Semgrep..."
+            SEMGREP_CMD="docker run --rm -v $(pwd):/src returntocorp/semgrep:latest"
+          fi
           
-          # Verify installation
-          semgrep --version
+          # Verify Semgrep is available
+          if command -v semgrep &> /dev/null; then
+            echo "Using native Semgrep:"
+            semgrep --version
+          else
+            echo "Using Docker-based Semgrep"
+          fi
           
           # Run Semgrep scan on all code
           echo ""
@@ -167,15 +178,37 @@ jobs:
           
           # Run Semgrep with auto config (includes security rules)
           # Generate both SARIF (for Concert) and JSON (for summary)
-          semgrep --config=auto \
-            --sarif \
-            --output=semgrep-results.sarif \
-            java-app/ python-app/ || true
-          
-          semgrep --config=auto \
-            --json \
-            --output=semgrep-results.json \
-            java-app/ python-app/ || true
+          if command -v semgrep &> /dev/null; then
+            # Native Semgrep
+            semgrep --config=auto \
+              --sarif \
+              --output=semgrep-results.sarif \
+              java-app/ python-app/ || true
+            
+            semgrep --config=auto \
+              --json \
+              --output=semgrep-results.json \
+              java-app/ python-app/ || true
+          else
+            # Docker-based Semgrep
+            docker run --rm \
+              -v $(pwd):/src \
+              -w /src \
+              returntocorp/semgrep:latest \
+              semgrep --config=auto \
+                --sarif \
+                --output=/src/semgrep-results.sarif \
+                /src/java-app/ /src/python-app/ || true
+            
+            docker run --rm \
+              -v $(pwd):/src \
+              -w /src \
+              returntocorp/semgrep:latest \
+              semgrep --config=auto \
+                --json \
+                --output=/src/semgrep-results.json \
+                /src/java-app/ /src/python-app/ || true
+          fi
           
           echo ""
           echo "✓ Semgrep SAST scan completed"
