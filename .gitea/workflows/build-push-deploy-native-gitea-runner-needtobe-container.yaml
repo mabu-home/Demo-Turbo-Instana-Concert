@@ -185,7 +185,7 @@ jobs:
             echo ""
             echo "Scan Results Summary:"
             echo "--------------------"
-            python3 -c "
+            python3 << 'PYTHON_SCRIPT'
 import sys, json
 try:
     with open('semgrep-results.json', 'r') as f:
@@ -210,7 +210,7 @@ try:
             print(f'Scan errors: {len(errors)}')
 except Exception as e:
     print(f'Could not parse results: {e}')
-" || echo "Could not generate summary"
+PYTHON_SCRIPT
           fi
           
           # List generated files
