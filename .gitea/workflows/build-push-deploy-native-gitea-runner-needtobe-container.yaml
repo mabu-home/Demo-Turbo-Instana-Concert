@@ -569,11 +569,12 @@ jobs:
           # Upload SARIF results to Concert
           echo ""
           echo "Uploading SAST results to Concert..."
+          echo "Using endpoint: ${CONCERT_URL}/core/api/v1/applications/demo-turbo-instana-concert/sast_results"
           
           # Use silent mode and only capture HTTP code (no progress output)
           HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/concert-sast-response.json \
             -X POST "${CONCERT_URL}/core/api/v1/applications/demo-turbo-instana-concert/sast_results" \
-            -H "C_API_KEY: ${CONCERT_API_KEY}" \
+            -H "Authorization: C_API_KEY ${CONCERT_API_KEY}" \
             -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
             -H "Content-Type: application/sarif+json" \
             --data-binary @"$SARIF_FILE" \
