@@ -39,7 +39,7 @@ make status
 ## Repository Structure
 
 ```
-├── .github/workflows/          # GitHub Actions CI/CD
+├── .gitea/workflows/           # Gitea Actions CI/CD with SAST & SBOM
 ├── python-app/                 # Load Test App (Python 3.9 / Flask)
 │   ├── Dockerfile
 │   ├── app.py
@@ -59,7 +59,10 @@ make status
 │   ├── deploy.sh
 │   └── apply-concert-patch.sh
 ├── concert-patches/            # IBM Concert remediation patches
-├── docs/                       # Presentation & documentation
+├── docs/                       # Documentation
+│   ├── CONCERT_INTEGRATION.md      # Concert SAST & SBOM setup
+│   ├── CONCERT_SECRETS_SETUP.md    # Quick secrets configuration
+│   └── GITEA_DEPLOYMENT_GUIDE.md   # Gitea CI/CD setup
 ├── Makefile                    # Build + push + deploy shortcuts
 └── README.md
 ```
@@ -103,5 +106,38 @@ scp root@192.168.178.35:/etc/kubernetes/admin.conf ~/.kube/config
 
 - **Instana** — traces, metrics, AI Actions (local Granite on vLLM + NVIDIA GPU)
 - **Turbonomic** — resize/scale actions triggered by load patterns
-- **Concert** — CVE detection, digest-matched build artifacts, remediation patches
+- **Concert** — SAST scanning (Semgrep), SBOM generation (Syft), CVE detection, remediation patches
 - **MCP Servers** — Instana + Kubernetes MCP connected to Claude & watsonx
+
+## Security Scanning & SBOM
+
+The CI/CD pipeline automatically performs:
+
+### 🔍 SAST Scanning with Semgrep
+- Runs on every commit after checkout
+- Scans both Java and Python applications
+- Detects security vulnerabilities in source code
+- Uploads results to IBM Concert in SARIF format
+
+### 📦 SBOM Generation with Syft
+- Generates Software Bill of Materials for all container images
+- Creates both SPDX and CycloneDX formats
+- Uploads to IBM Concert for vulnerability tracking
+- Stored as artifacts for compliance
+
+### 📊 Concert Integration
+All security data is uploaded to the `demo-turbo-instana-concert` application in IBM Concert:
+- **SAST Results**: Security vulnerabilities from code analysis
+- **SBOM Data**: Complete dependency inventory with versions
+- **CVE Tracking**: Known vulnerabilities in dependencies
+
+**Setup Guide**: See [docs/CONCERT_INTEGRATION.md](docs/CONCERT_INTEGRATION.md) for detailed configuration.
+
+**Quick Start**: See [docs/CONCERT_SECRETS_SETUP.md](docs/CONCERT_SECRETS_SETUP.md) for secrets configuration.
+
+### Required Secrets (Gitea)
+```bash
+CONCERT_URL              # IBM Concert instance URL
+CONCERT_API_KEY          # Concert API authentication key
+CONCERT_INSTANCE_ID      # Concert instance identifier
+```
