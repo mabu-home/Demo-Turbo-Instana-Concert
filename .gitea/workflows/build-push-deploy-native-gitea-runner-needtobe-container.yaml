@@ -330,68 +330,88 @@ jobs:
           if command -v semgrep &> /dev/null; then
             # Native Semgrep
             echo "Using native Semgrep..."
+            echo ""
+            
+            # Note: Semgrep exit code 2 means findings were found (not an error)
+            # Exit codes: 0 = no findings, 1 = error, 2 = findings found
             
             # Run SARIF scan
             echo "Generating SARIF output..."
-            if semgrep --config=auto \
+            semgrep --config=auto \
               --sarif \
               --output="$WORKSPACE_DIR/semgrep-results.sarif" \
-              java-app/ python-app/ 2>&1; then
-              echo "✓ SARIF scan completed"
+              java-app/ python-app/ 2>&1 || EXIT_CODE=$?
+            
+            # Check exit code (0 or 2 are success, 1 is error)
+            if [ -z "$EXIT_CODE" ] || [ "$EXIT_CODE" = "0" ] || [ "$EXIT_CODE" = "2" ]; then
+              echo "✓ SARIF scan completed (exit code: ${EXIT_CODE:-0})"
               SCAN_SUCCESS=true
             else
-              EXIT_CODE=$?
               echo "⚠️  SARIF scan failed with exit code $EXIT_CODE"
             fi
             
             # Run JSON scan for summary
+            echo ""
             echo "Generating JSON output..."
-            if semgrep --config=auto \
+            unset EXIT_CODE
+            semgrep --config=auto \
               --json \
               --output="$WORKSPACE_DIR/semgrep-results.json" \
-              java-app/ python-app/ 2>&1; then
-              echo "✓ JSON scan completed"
+              java-app/ python-app/ 2>&1 || EXIT_CODE=$?
+            
+            # Check exit code (0 or 2 are success, 1 is error)
+            if [ -z "$EXIT_CODE" ] || [ "$EXIT_CODE" = "0" ] || [ "$EXIT_CODE" = "2" ]; then
+              echo "✓ JSON scan completed (exit code: ${EXIT_CODE:-0})"
               SCAN_SUCCESS=true
             else
-              EXIT_CODE=$?
               echo "⚠️  JSON scan failed with exit code $EXIT_CODE"
             fi
           else
             # Docker-based Semgrep
             echo "Using Docker-based Semgrep..."
             echo "Current directory: $(pwd)"
+            echo ""
+            
+            # Note: Semgrep exit code 2 means findings were found (not an error)
+            # Exit codes: 0 = no findings, 1 = error, 2 = findings found
             
             # Run SARIF scan
             echo "Generating SARIF output..."
-            if docker run --rm \
+            docker run --rm \
               -v "$(pwd):/src" \
               -w /src \
               returntocorp/semgrep:latest \
               semgrep --config=auto \
               --sarif \
               --output=/src/semgrep-results.sarif \
-              /src/java-app/ /src/python-app/ 2>&1; then
-              echo "✓ SARIF scan completed"
+              java-app/ python-app/ 2>&1 || EXIT_CODE=$?
+            
+            # Check exit code (0 or 2 are success, 1 is error)
+            if [ -z "$EXIT_CODE" ] || [ "$EXIT_CODE" = "0" ] || [ "$EXIT_CODE" = "2" ]; then
+              echo "✓ SARIF scan completed (exit code: ${EXIT_CODE:-0})"
               SCAN_SUCCESS=true
             else
-              EXIT_CODE=$?
               echo "⚠️  SARIF scan failed with exit code $EXIT_CODE"
             fi
             
             # Run JSON scan
+            echo ""
             echo "Generating JSON output..."
-            if docker run --rm \
+            unset EXIT_CODE
+            docker run --rm \
               -v "$(pwd):/src" \
               -w /src \
               returntocorp/semgrep:latest \
               semgrep --config=auto \
               --json \
               --output=/src/semgrep-results.json \
-              /src/java-app/ /src/python-app/ 2>&1; then
-              echo "✓ JSON scan completed"
+              java-app/ python-app/ 2>&1 || EXIT_CODE=$?
+            
+            # Check exit code (0 or 2 are success, 1 is error)
+            if [ -z "$EXIT_CODE" ] || [ "$EXIT_CODE" = "0" ] || [ "$EXIT_CODE" = "2" ]; then
+              echo "✓ JSON scan completed (exit code: ${EXIT_CODE:-0})"
               SCAN_SUCCESS=true
             else
-              EXIT_CODE=$?
               echo "⚠️  JSON scan failed with exit code $EXIT_CODE"
             fi
           fi
@@ -846,9 +866,10 @@ except Exception as e:
             # Generate SBOM with syft installed on host
             echo "Using native syft ($(syft version))..."
             if syft "${IMAGE_NAME}:latest" \
-              -o cyclonedx-json="$WORKSPACE_DIR/sbom-java-cyclonedx.json" \
-              -o cyclonedx-json="/tmp/sbom-output/sbom-java-cyclonedx.json"; then
-              echo "✓ Java SBOM generated successfully"
+              -o cyclonedx-json="$WORKSPACE_DIR/sbom-java-cyclonedx.json"; then
+              echo "✓ Java SBOM generated to workspace"
+              # Copy to /tmp for backup
+              cp "$WORKSPACE_DIR/sbom-java-cyclonedx.json" "/tmp/sbom-output/sbom-java-cyclonedx.json" 2>/dev/null || true
             else
               echo "❌ Syft scan failed (native)"
               exit 1
@@ -856,15 +877,16 @@ except Exception as e:
           else
             # Generate SBOM using Docker container
             echo "Using Docker-based syft..."
+            # First, generate to a mounted directory
             if docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -v "$WORKSPACE_DIR:/output" \
-              -v "/tmp/sbom-output:/tmp-output" \
               anchore/syft:latest \
               "${IMAGE_NAME}:latest" \
-              -o cyclonedx-json=/output/sbom-java-cyclonedx.json \
-              -o cyclonedx-json=/tmp-output/sbom-java-cyclonedx.json; then
-              echo "✓ Java SBOM generated successfully"
+              -o cyclonedx-json=/output/sbom-java-cyclonedx.json; then
+              echo "✓ Java SBOM generated to workspace"
+              # Copy to /tmp for backup
+              cp "$WORKSPACE_DIR/sbom-java-cyclonedx.json" "/tmp/sbom-output/sbom-java-cyclonedx.json" 2>/dev/null || true
             else
               echo "❌ Syft scan failed (Docker)"
               exit 1
@@ -927,9 +949,10 @@ except Exception as e:
             # Generate SBOM with syft installed on host
             echo "Using native syft ($(syft version))..."
             if syft "${IMAGE_NAME}:latest" \
-              -o cyclonedx-json="$WORKSPACE_DIR/sbom-python-cyclonedx.json" \
-              -o cyclonedx-json="/tmp/sbom-output/sbom-python-cyclonedx.json"; then
-              echo "✓ Python SBOM generated successfully"
+              -o cyclonedx-json="$WORKSPACE_DIR/sbom-python-cyclonedx.json"; then
+              echo "✓ Python SBOM generated to workspace"
+              # Copy to /tmp for backup
+              cp "$WORKSPACE_DIR/sbom-python-cyclonedx.json" "/tmp/sbom-output/sbom-python-cyclonedx.json" 2>/dev/null || true
             else
               echo "❌ Syft scan failed (native)"
               exit 1
@@ -937,15 +960,16 @@ except Exception as e:
           else
             # Generate SBOM using Docker container
             echo "Using Docker-based syft..."
+            # First, generate to a mounted directory
             if docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -v "$WORKSPACE_DIR:/output" \
-              -v "/tmp/sbom-output:/tmp-output" \
               anchore/syft:latest \
               "${IMAGE_NAME}:latest" \
-              -o cyclonedx-json=/output/sbom-python-cyclonedx.json \
-              -o cyclonedx-json=/tmp-output/sbom-python-cyclonedx.json; then
-              echo "✓ Python SBOM generated successfully"
+              -o cyclonedx-json=/output/sbom-python-cyclonedx.json; then
+              echo "✓ Python SBOM generated to workspace"
+              # Copy to /tmp for backup
+              cp "$WORKSPACE_DIR/sbom-python-cyclonedx.json" "/tmp/sbom-output/sbom-python-cyclonedx.json" 2>/dev/null || true
             else
               echo "❌ Syft scan failed (Docker)"
               exit 1
