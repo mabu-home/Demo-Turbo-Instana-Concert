@@ -1,0 +1,178 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: zap-report-collector
+  namespace: demo-turbo-instana-concert
+  labels:
+    app: zap-report-collector
+    component: security-automation
+spec:
+  # Run every 15 minutes to check for completed scans
+  schedule: "*/15 * * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Replace
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 3600  # Clean up after 1 hour
+      template:
+        metadata:
+          labels:
+            app: zap-report-collector
+            component: security-automation
+        spec:
+          serviceAccountName: demo-turbo-instana-concert-sa
+          restartPolicy: OnFailure
+          containers:
+          - name: report-collector
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              #!/bin/bash
+              set -e
+              
+              echo "================================================"
+              echo "🔍 ZAP Report Collector - $(date)"
+              echo "================================================"
+              
+              # Check if ZAP scan job exists and is completed
+              if ! kubectl get job zap-full-scan -n demo-turbo-instana-concert &>/dev/null; then
+                echo "ℹ️  No ZAP scan job found. Nothing to collect."
+                exit 0
+              fi
+              
+              # Get job status
+              JOB_STATUS=$(kubectl get job zap-full-scan -n demo-turbo-instana-concert -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || echo "")
+              
+              if [ "$JOB_STATUS" != "True" ]; then
+                # Check if job is still running
+                ACTIVE=$(kubectl get job zap-full-scan -n demo-turbo-instana-concert -o jsonpath='{.status.active}' 2>/dev/null || echo "0")
+                if [ "$ACTIVE" -gt 0 ]; then
+                  echo "⏳ ZAP scan is still running. Will check again in 15 minutes."
+                  exit 0
+                fi
+                
+                # Check if job failed
+                FAILED=$(kubectl get job zap-full-scan -n demo-turbo-instana-concert -o jsonpath='{.status.failed}' 2>/dev/null || echo "0")
+                if [ "$FAILED" -gt 0 ]; then
+                  echo "❌ ZAP scan job failed. Check logs: kubectl logs job/zap-full-scan -n demo-turbo-instana-concert"
+                  exit 1
+                fi
+                
+                echo "ℹ️  ZAP scan not yet complete. Will check again in 15 minutes."
+                exit 0
+              fi
+              
+              echo "✅ ZAP scan completed! Collecting reports..."
+              
+              # Get the pod name
+              POD_NAME=$(kubectl get pods -n demo-turbo-instana-concert \
+                -l job-name=zap-full-scan \
+                --field-selector=status.phase=Succeeded \
+                -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+              
+              if [ -z "$POD_NAME" ]; then
+                echo "❌ Could not find completed ZAP scan pod"
+                exit 1
+              fi
+              
+              echo "📦 Found completed pod: $POD_NAME"
+              
+              # Create reports directory
+              mkdir -p /tmp/zap-reports
+              
+              # Copy reports from pod
+              echo "📥 Downloading HTML report..."
+              if kubectl cp demo-turbo-instana-concert/$POD_NAME:/zap/wrk/full-scan-report.html /tmp/zap-reports/full-scan-report.html 2>/dev/null; then
+                echo "✅ HTML report downloaded"
+                ls -lh /tmp/zap-reports/full-scan-report.html
+              else
+                echo "⚠️  HTML report not found"
+              fi
+              
+              echo "📥 Downloading JSON report..."
+              if kubectl cp demo-turbo-instana-concert/$POD_NAME:/zap/wrk/full-scan-report.json /tmp/zap-reports/full-scan-report.json 2>/dev/null; then
+                echo "✅ JSON report downloaded"
+                ls -lh /tmp/zap-reports/full-scan-report.json
+              else
+                echo "⚠️  JSON report not found"
+              fi
+              
+              echo "📥 Downloading XML report..."
+              if kubectl cp demo-turbo-instana-concert/$POD_NAME:/zap/wrk/full-scan-report.xml /tmp/zap-reports/full-scan-report.xml 2>/dev/null; then
+                echo "✅ XML report downloaded"
+                ls -lh /tmp/zap-reports/full-scan-report.xml
+              else
+                echo "⚠️  XML report not found"
+              fi
+              
+              # Create a ConfigMap with the reports (for small reports)
+              echo "📤 Creating ConfigMap with report metadata..."
+              
+              TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              SCAN_DURATION=$(kubectl get job zap-full-scan -n demo-turbo-instana-concert -o jsonpath='{.status.completionTime}' 2>/dev/null || echo "unknown")
+              
+              kubectl create configmap zap-scan-results-$TIMESTAMP \
+                --from-literal=scan_completed="$TIMESTAMP" \
+                --from-literal=scan_duration="$SCAN_DURATION" \
+                --from-literal=pod_name="$POD_NAME" \
+                --from-literal=reports_location="/tmp/zap-reports" \
+                -n demo-turbo-instana-concert \
+                --dry-run=client -o yaml | kubectl apply -f -
+              
+              echo "✅ Report metadata saved to ConfigMap: zap-scan-results-$TIMESTAMP"
+              
+              # Parse JSON report for summary (if available)
+              if [ -f /tmp/zap-reports/full-scan-report.json ]; then
+                echo ""
+                echo "📊 Scan Summary:"
+                echo "================"
+                
+                # Extract key metrics using grep and basic parsing
+                ALERTS=$(grep -o '"alerts":\[' /tmp/zap-reports/full-scan-report.json | wc -l || echo "0")
+                echo "Total Alerts: $ALERTS"
+                
+                # Count by risk level (basic parsing)
+                HIGH=$(grep -o '"risk":"High"' /tmp/zap-reports/full-scan-report.json | wc -l || echo "0")
+                MEDIUM=$(grep -o '"risk":"Medium"' /tmp/zap-reports/full-scan-report.json | wc -l || echo "0")
+                LOW=$(grep -o '"risk":"Low"' /tmp/zap-reports/full-scan-report.json | wc -l || echo "0")
+                INFO=$(grep -o '"risk":"Informational"' /tmp/zap-reports/full-scan-report.json | wc -l || echo "0")
+                
+                echo "  High Risk: $HIGH"
+                echo "  Medium Risk: $MEDIUM"
+                echo "  Low Risk: $LOW"
+                echo "  Informational: $INFO"
+              fi
+              
+              echo ""
+              echo "================================================"
+              echo "✅ Report collection complete!"
+              echo "================================================"
+              echo ""
+              echo "To retrieve reports:"
+              echo "  kubectl get configmap -n demo-turbo-instana-concert | grep zap-scan-results"
+              echo ""
+              echo "To view report metadata:"
+              echo "  kubectl get configmap zap-scan-results-$TIMESTAMP -n demo-turbo-instana-concert -o yaml"
+              echo ""
+              echo "Reports are stored in pod: $POD_NAME"
+              echo "Use './scripts/run-zap-scan.sh' to download reports locally"
+              
+              # Optional: Clean up old scan jobs (keep last 3)
+              echo ""
+              echo "🧹 Cleaning up old scan jobs..."
+              kubectl get jobs -n demo-turbo-instana-concert -l app=zap-security-scan --sort-by=.metadata.creationTimestamp -o name | head -n -3 | xargs -r kubectl delete -n demo-turbo-instana-concert || true
+              
+              exit 0
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "100m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"
+
+# Made with Bob
