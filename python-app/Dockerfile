@@ -1,5 +1,5 @@
 # Multi-stage build für optimierte Container-Größe
-FROM python:3.9-slim-bullseye AS builder
+FROM python:3.11-slim-bookworm AS builder
 
 # Build dependencies
 RUN apt-get update && apt-get install -y \
@@ -12,20 +12,23 @@ COPY requirements.txt /tmp/
 RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt
 
 # Production stage
-FROM python:3.9-slim-bullseye
+FROM python:3.11-slim-bookworm
 
 # Metadata
 LABEL maintainer="mbx1010" \
-      version="2.0" \
-      description="Load Testing Application with Echo Service Integration" \
+      version="2.1" \
+      description="Load Testing Application with Echo Service Integration - Security Hardened" \
       org.opencontainers.image.source="https://github.com/mbx1010/load-test-app"
 
 # System dependencies für stress-ng und monitoring
+# Upgrade sed to fix CVE-2026-5958
 RUN apt-get update && apt-get install -y \
     stress-ng \
     htop \
     curl \
     procps \
+    sed \
+    && apt-get upgrade -y sed \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user erstellen
