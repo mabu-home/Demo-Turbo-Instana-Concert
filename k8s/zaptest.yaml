@@ -28,27 +28,38 @@ spec:
             echo "Target: http://load-test-service.demo-turbo-instana-concert.svc.cluster.local"
             echo "Also scanning: http://vulnerable-echo-service.demo-turbo-instana-concert.svc.cluster.local:8085"
             
-            # Scan the main load-test service
-            zap-full-scan.py -t http://load-test-service.demo-turbo-instana-concert.svc.cluster.local -I -J full-scan-report.json -r full-scan-report.html
+            # Set ZAP memory options to prevent OOM
+            export JAVA_OPTS="-Xmx3g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+            
+            # Scan the main load-test service with memory-optimized settings
+            # -z: Additional ZAP command line options for memory tuning
+            zap-full-scan.py \
+              -t http://load-test-service.demo-turbo-instana-concert.svc.cluster.local \
+              -I \
+              -J full-scan-report.json \
+              -r full-scan-report.html \
+              -x full-scan-report.xml \
+              -z "-config spider.maxDuration=10 -config spider.maxDepth=5"
             
             echo "Scan complete!"
             echo "Generated reports:"
-            ls -lh /zap/wrk/*.json /zap/wrk/*.html
+            ls -lh /zap/wrk/*.json /zap/wrk/*.html /zap/wrk/*.xml 2>/dev/null || echo "Some reports may not have been generated"
             
             echo "Sleeping for 10 minutes to allow file download..."
             echo "Use the following commands to retrieve reports:"
             echo "  kubectl -n demo-turbo-instana-concert cp \$POD_NAME:/zap/wrk/full-scan-report.html ./concert-security-scan.html"
             echo "  kubectl -n demo-turbo-instana-concert cp \$POD_NAME:/zap/wrk/full-scan-report.json ./concert-security-scan.json"
+            echo "  kubectl -n demo-turbo-instana-concert cp \$POD_NAME:/zap/wrk/full-scan-report.xml ./concert-security-scan.xml"
             sleep 600
         volumeMounts:
         - name: zap-storage
           mountPath: /zap/wrk
         resources:
           requests:
-            memory: "512Mi"
-            cpu: "500m"
-          limits:
             memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
             cpu: "2000m"
       volumes:
       - name: zap-storage
