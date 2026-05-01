@@ -1,0 +1,58 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zap-full-scan
+  namespace: demo-turbo-instana-concert
+  labels:
+    app: zap-security-scan
+    component: security-testing
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: zap-security-scan
+    spec:
+      containers:
+      - name: zap
+        image: ghcr.io/zaproxy/zaproxy:stable
+        # Command explanation:
+        # -t: Target URL (using internal service name for cluster access)
+        # -I: Exit with code 0 even if warnings are found
+        # -J: Generate JSON report
+        # -r: Generate HTML report
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "Starting OWASP ZAP Full Scan..."
+            echo "Target: http://load-test-service.demo-turbo-instana-concert.svc.cluster.local"
+            echo "Also scanning: http://vulnerable-echo-service.demo-turbo-instana-concert.svc.cluster.local:8085"
+            
+            # Scan the main load-test service
+            zap-full-scan.py -t http://load-test-service.demo-turbo-instana-concert.svc.cluster.local -I -J full-scan-report.json -r full-scan-report.html
+            
+            echo "Scan complete!"
+            echo "Generated reports:"
+            ls -lh /zap/wrk/*.json /zap/wrk/*.html
+            
+            echo "Sleeping for 10 minutes to allow file download..."
+            echo "Use the following commands to retrieve reports:"
+            echo "  kubectl -n demo-turbo-instana-concert cp \$POD_NAME:/zap/wrk/full-scan-report.html ./concert-security-scan.html"
+            echo "  kubectl -n demo-turbo-instana-concert cp \$POD_NAME:/zap/wrk/full-scan-report.json ./concert-security-scan.json"
+            sleep 600
+        volumeMounts:
+        - name: zap-storage
+          mountPath: /zap/wrk
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+      volumes:
+      - name: zap-storage
+        emptyDir: {}
+      restartPolicy: Never
+
+# Made with Bob

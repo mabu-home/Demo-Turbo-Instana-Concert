@@ -39,7 +39,7 @@ make status
 ## Repository Structure
 
 ```
-├── .gitea/workflows/           # Gitea Actions CI/CD with SAST & SBOM
+├── .gitea/workflows/           # Gitea Actions CI/CD with SAST, SBOM & ZAP
 ├── python-app/                 # Load Test App (Python 3.9 / Flask)
 │   ├── Dockerfile
 │   ├── app.py
@@ -54,16 +54,19 @@ make status
 │   ├── python-app-deployment.yaml
 │   ├── echo-service-deployment.yaml
 │   ├── ingress.yaml
+│   ├── zaptest.yaml                # OWASP ZAP security scan job
 │   └── hpa.yaml
 ├── scripts/                    # Deployment & patch scripts
 │   ├── deploy.sh
 │   ├── apply-concert-patch.sh
-│   └── diagnose-sbom.sh            # SBOM troubleshooting tool
+│   ├── diagnose-sbom.sh            # SBOM troubleshooting tool
+│   └── run-zap-scan.sh             # Automated ZAP security scan
 ├── concert-patches/            # IBM Concert remediation patches
 ├── docs/                       # Documentation
 │   ├── CONCERT_INTEGRATION.md      # Concert SAST & SBOM setup
 │   ├── CONCERT_SECRETS_SETUP.md    # Quick secrets configuration
 │   ├── SBOM_TROUBLESHOOTING.md     # SBOM upload troubleshooting
+│   ├── ZAP_SECURITY_SCAN_GUIDE.md  # OWASP ZAP scan & Concert upload
 │   └── GITEA_DEPLOYMENT_GUIDE.md   # Gitea CI/CD setup
 ├── Makefile                    # Build + push + deploy shortcuts
 └── README.md
@@ -113,7 +116,7 @@ scp root@192.168.178.35:/etc/kubernetes/admin.conf ~/.kube/config
 
 ## Security Scanning & SBOM
 
-The CI/CD pipeline automatically performs:
+The CI/CD pipeline automatically performs comprehensive security testing:
 
 ### 🔍 SAST Scanning with Semgrep
 - Runs on every commit after checkout
@@ -127,11 +130,29 @@ The CI/CD pipeline automatically performs:
 - Uploads to IBM Concert for vulnerability tracking
 - Stored as artifacts for compliance
 
+### 🔒 DAST Scanning with OWASP ZAP (NEW!)
+- **Automatically triggered** after every deployment
+- Performs dynamic application security testing on running applications
+- Scans all exposed endpoints via ingress: `concert.lab.allwaysbeginner.com`
+- Generates HTML and JSON reports for Concert upload
+- Detects runtime vulnerabilities, misconfigurations, and security issues
+
+**Manual Scan:**
+```bash
+# Run on-demand security scan
+./scripts/run-zap-scan.sh
+
+# Reports saved to: ./security-reports/
+```
+
+**ZAP Scan Guide**: See [docs/ZAP_SECURITY_SCAN_GUIDE.md](docs/ZAP_SECURITY_SCAN_GUIDE.md) for complete documentation.
+
 ### 📊 Concert Integration
 All security data is uploaded to the `demo-turbo-instana-concert` application in IBM Concert:
 - **SAST Results**: Security vulnerabilities from code analysis
 - **SBOM Data**: Complete dependency inventory with versions
 - **CVE Tracking**: Known vulnerabilities in dependencies
+- **DAST Results**: Runtime security findings from ZAP scans
 
 **Setup Guide**: See [docs/CONCERT_INTEGRATION.md](docs/CONCERT_INTEGRATION.md) for detailed configuration.
 
