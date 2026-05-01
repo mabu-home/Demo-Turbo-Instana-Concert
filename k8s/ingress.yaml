@@ -20,10 +20,10 @@ spec:
   ingressClassName: traefik
   tls:
   - hosts:
-    - concert.lab.allwaysbeginner.com
+    - demo-turbo-instana-concert.lab.allwaysbeginner.com
     secretName: demo-turbo-instana-concert-tls
   rules:
-  - host: concert.lab.allwaysbeginner.com
+  - host: demo-turbo-instana-concert.lab.allwaysbeginner.com
     http:
       paths:
       # Load Test App routes
