@@ -18,6 +18,12 @@ This guide explains how the CI/CD pipeline integrates with IBM Concert for secur
 - **Formats**: Creates both SPDX and CycloneDX formats
 - **Upload**: Automatically uploads CycloneDX format to Concert (preferred format)
 
+### 3. DAST Scanning with OWASP ZAP
+- **When**: Runs after deployment to Kubernetes
+- **What**: Performs dynamic application security testing on running applications
+- **Output**: Generates JSON and HTML format reports
+- **Upload**: Automatically uploads scan results to Concert
+
 ## Required Secrets
 
 Configure these secrets in Gitea: **Repository → Settings → Secrets → Actions**
@@ -48,8 +54,8 @@ Configure these secrets in Gitea: **Repository → Settings → Secrets → Acti
 ```
 1. Validate Secrets (includes Concert secrets check)
 2. Checkout Code
-3. Run Semgrep SAST Scan ← NEW
-4. Upload Semgrep Results to Concert ← NEW
+3. Run Semgrep SAST Scan
+4. Upload Semgrep Results to Concert
 5. Install Docker
 6. Install kubectl
 7. Verify Docker/kubectl
@@ -59,9 +65,14 @@ Configure these secrets in Gitea: **Repository → Settings → Secrets → Acti
 11. Build Python Load Test App
 12. Generate Java SBOM
 13. Generate Python SBOM
-14. Upload SBOMs to Concert ← UPDATED
+14. Upload SBOMs to Concert
 15. Upload SBOM Artifacts (to Gitea)
 16-25. Deploy to Kubernetes...
+26. Deploy ZAP Security Scan ← NEW
+27. Wait for ZAP Scan Completion ← NEW
+28. Retrieve ZAP Scan Results ← NEW
+29. Upload ZAP Results to Concert ← NEW
+30. Upload ZAP Reports as Artifacts ← NEW
 ```
 
 ## Concert Application Configuration
@@ -74,7 +85,8 @@ Configure these secrets in Gitea: **Repository → Settings → Secrets → Acti
 ### Data Uploaded to Concert
 
 1. **SAST Results** (Semgrep)
-   - Endpoint: `/core/api/v1/applications/demo-turbo-instana-concert/sast_results`
+   - Endpoint: `/ingestion/api/v1/upload_files`
+   - Data Type: `static_code_scan`
    - Format: SARIF (Security Analysis Results Interchange Format)
    - Content: Security vulnerabilities found in source code
 
@@ -87,6 +99,12 @@ Configure these secrets in Gitea: **Repository → Settings → Secrets → Acti
    - Endpoint: `/core/api/v1/applications/demo-turbo-instana-concert/sbom`
    - Format: CycloneDX JSON
    - Content: Complete dependency tree for Python Load Test App
+
+4. **DAST Results** (OWASP ZAP)
+   - Endpoint: `/ingestion/api/v1/upload_files`
+   - Data Type: `dynamic_code_scan`
+   - Format: JSON or HTML
+   - Content: Dynamic security scan results from running application
 
 ## Semgrep SAST Scan Details
 

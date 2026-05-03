@@ -1546,6 +1546,133 @@ jobs:
           echo "   - Upload the JSON or HTML report"
         continue-on-error: true
       
+      # Step: Upload ZAP Results to Concert
+      - name: Upload ZAP Results to Concert
+        if: secrets.CONCERT_URL != ''
+        continue-on-error: true
+        env:
+          CONCERT_URL: ${{ secrets.CONCERT_URL }}
+          CONCERT_API_KEY: ${{ secrets.CONCERT_API_KEY }}
+          CONCERT_INSTANCE_ID: ${{ secrets.CONCERT_INSTANCE_ID }}
+        run: |
+          echo "============================================"
+          echo "Uploading ZAP DAST Results to Concert"
+          echo "============================================"
+          echo "Application: demo-turbo-instana-concert"
+          echo "Concert URL: ${CONCERT_URL}"
+          echo ""
+          
+          # Check if ZAP report exists
+          ZAP_REPORT=""
+          
+          if [ -f "./security-reports/concert-security-scan.json" ]; then
+            ZAP_REPORT="./security-reports/concert-security-scan.json"
+            echo "✓ Found ZAP JSON report: $ZAP_REPORT"
+          elif [ -f "./security-reports/concert-security-scan.html" ]; then
+            ZAP_REPORT="./security-reports/concert-security-scan.html"
+            echo "✓ Found ZAP HTML report: $ZAP_REPORT"
+          else
+            echo "⚠️  No ZAP scan reports found"
+            echo "Checked locations:"
+            echo "  - ./security-reports/concert-security-scan.json"
+            echo "  - ./security-reports/concert-security-scan.html"
+            echo ""
+            echo "ZAP scan may still be running or failed to complete."
+            echo "Skipping upload (non-blocking)..."
+            exit 0
+          fi
+          
+          # Verify file is not empty
+          if [ ! -s "$ZAP_REPORT" ]; then
+            echo "⚠️  ZAP report file is empty, skipping upload"
+            exit 0
+          fi
+          
+          # Show file info
+          echo ""
+          echo "Report Details:"
+          FILE_SIZE=$(ls -lh "$ZAP_REPORT" | awk '{print $5}')
+          echo "  File: $ZAP_REPORT"
+          echo "  Size: $FILE_SIZE"
+          
+          # Validate JSON format if it's a JSON file
+          if [[ "$ZAP_REPORT" == *.json ]]; then
+            echo ""
+            echo "Validating JSON format..."
+            if command -v jq &> /dev/null; then
+              if jq empty "$ZAP_REPORT" 2>/dev/null; then
+                echo "✓ JSON file is valid"
+              else
+                echo "⚠️  JSON file is not valid, skipping upload"
+                exit 0
+              fi
+            else
+              echo "⚠️  jq not available, skipping validation"
+            fi
+          fi
+          
+          # Upload ZAP results to Concert using Ingestion API
+          echo ""
+          echo "Uploading DAST results to Concert..."
+          echo "Using Concert Ingestion API: ${CONCERT_URL}/ingestion/api/v1/upload_files"
+          
+          # Get repository info from Gitea context
+          REPO_URL="${{ gitea.server_url }}/${{ gitea.repository }}"
+          REPO_NAME="${{ gitea.repository }}"
+          
+          # Determine file extension for upload
+          FILE_EXT="${ZAP_REPORT##*.}"
+          
+          # Use silent mode and only capture HTTP code
+          # Use data_type=dynamic_code_scan (correct type for DAST/ZAP scans)
+          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/concert-zap-response.json \
+            -X POST "${CONCERT_URL}/ingestion/api/v1/upload_files" \
+            -H "accept: application/json" \
+            -H "Content-Type: multipart/form-data" \
+            -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
+            -H "Authorization: C_API_KEY ${CONCERT_API_KEY}" \
+            -F "data_type=dynamic_code_scan" \
+            -F "filename=@${ZAP_REPORT}" \
+            -F "metadata={\"env_name\":\"prod\",\"repo_url\":\"${REPO_URL}\",\"repo_name\":\"${REPO_NAME}\",\"tool\":\"zap\",\"format\":\"${FILE_EXT}\",\"scan_type\":\"dast\",\"access_point\":\"concert.lab.allwaysbeginner.com\"}" \
+            --connect-timeout 10 \
+            --max-time 60)
+          
+          echo "HTTP Response Code: ${HTTP_CODE}"
+          echo ""
+          
+          # Check response
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
+            echo "✅ SUCCESS: ZAP scan results uploaded to Concert"
+            echo ""
+            echo "Response:"
+            if [ -f /tmp/concert-zap-response.json ]; then
+              cat /tmp/concert-zap-response.json | jq '.' 2>/dev/null || cat /tmp/concert-zap-response.json
+            fi
+            echo ""
+            echo "View results in Concert:"
+            echo "  ${CONCERT_URL}/applications/demo-turbo-instana-concert"
+          elif [ "$HTTP_CODE" = "401" ]; then
+            echo "❌ FAILED: Authentication error (401 Unauthorized)"
+            echo "Please verify CONCERT_API_KEY and CONCERT_INSTANCE_ID secrets"
+          elif [ "$HTTP_CODE" = "404" ]; then
+            echo "❌ FAILED: Application not found (404 Not Found)"
+            echo "Please ensure 'demo-turbo-instana-concert' application exists in Concert"
+          elif [ "$HTTP_CODE" = "413" ]; then
+            echo "❌ FAILED: File too large (413 Payload Too Large)"
+            echo "ZAP report size: $FILE_SIZE"
+            echo "Consider reducing scan scope or using compressed format"
+          else
+            echo "⚠️  WARNING: Unexpected response code: ${HTTP_CODE}"
+            echo ""
+            echo "Response:"
+            if [ -f /tmp/concert-zap-response.json ]; then
+              cat /tmp/concert-zap-response.json
+            fi
+          fi
+          
+          echo ""
+          echo "============================================"
+      
       - name: Upload ZAP Reports as Artifacts
         if: always()
         run: |

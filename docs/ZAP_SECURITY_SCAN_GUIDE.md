@@ -6,6 +6,8 @@ This guide provides step-by-step instructions for running OWASP ZAP (Zed Attack 
 
 **✨ NEW: Automatic Scan Execution** - ZAP security scans are now automatically triggered after every deployment via the CI/CD pipeline!
 
+**✨ NEW: Automatic Concert Upload** - ZAP scan results are now automatically uploaded to IBM Concert for vulnerability management!
+
 ## Table of Contents
 
 1. [Automatic Execution (CI/CD)](#automatic-execution-cicd)
@@ -48,7 +50,13 @@ The CI/CD pipeline includes these automatic ZAP scan steps:
 - Attempts to retrieve reports if scan completes quickly
 - Provides manual retrieval instructions if still running
 
-# Step 4: Upload ZAP Reports as Artifacts
+# Step 4: Upload ZAP Results to Concert (NEW!)
+- Automatically uploads scan results to IBM Concert
+- Uses Concert Ingestion API
+- Supports both JSON and HTML formats
+- Non-blocking (continues even if upload fails)
+
+# Step 5: Upload ZAP Reports as Artifacts
 - Makes reports available for download from workflow
 ```
 
@@ -202,19 +210,58 @@ ls -lh ./security-reports/
 
 ## Uploading to IBM Concert
 
-### Prerequisites
+### Automatic Upload (CI/CD) - RECOMMENDED
+
+**✨ NEW: ZAP scan results are now automatically uploaded to Concert!**
+
+The CI/CD pipeline automatically uploads ZAP scan results to IBM Concert after each scan completes. This happens in the "Upload ZAP Results to Concert" step.
+
+**How It Works:**
+1. ZAP scan completes and generates reports
+2. Pipeline retrieves JSON or HTML report
+3. Report is automatically uploaded to Concert Ingestion API
+4. Results appear in Concert dashboard within minutes
+
+**Requirements:**
+- Concert secrets must be configured in Gitea:
+  - `CONCERT_URL`: Your Concert instance URL
+  - `CONCERT_API_KEY`: Concert API key
+  - `CONCERT_INSTANCE_ID`: Concert instance ID
+- See [CONCERT_SECRETS_SETUP.md](./CONCERT_SECRETS_SETUP.md) for setup instructions
+
+**Viewing Results:**
+1. Log in to IBM Concert: `https://91431.us-south-8.concert.saas.ibm.com`
+2. Navigate to Applications → `demo-turbo-instana-concert`
+3. Go to Security → DAST Results or Vulnerabilities
+4. View ZAP scan findings with severity ratings
+
+**Upload Status:**
+Check the workflow logs for upload confirmation:
+```
+✅ SUCCESS: ZAP scan results uploaded to Concert
+View results in Concert:
+  https://91431.us-south-8.concert.saas.ibm.com/applications/demo-turbo-instana-concert
+```
+
+---
+
+### Manual Upload (Alternative Method)
+
+If automatic upload fails or you need to upload manually:
+
+#### Prerequisites
 
 - IBM Concert account with upload permissions
 - ZAP scan report (HTML or JSON format)
 - Access to Concert UI or API
 
-### Step 1: Access IBM Concert Upload Interface
+#### Step 1: Access IBM Concert Upload Interface
 
 1. Log in to IBM Concert: `https://91431.us-south-8.concert.saas.ibm.com`
 2. Navigate to **Vulnerability** or **Exposures** section
 3. Click **"Upload exposure"** or **"Upload an exposure scan"**
 
-### Step 2: Configure Upload Settings
+#### Step 2: Configure Upload Settings
 
 Fill in the upload form:
 
@@ -227,7 +274,7 @@ Fill in the upload form:
 | **Scan Time** | Scan execution time | Format: HH:MM (e.g., 14:30) |
 | **File** | Select report | Choose JSON (preferred) or HTML |
 
-### Step 3: Upload the Report
+#### Step 3: Upload the Report
 
 **Recommended: Use JSON format**
 ```bash
@@ -246,14 +293,14 @@ Fill in the upload form:
 - Maximum number of files: 10
 - Supported formats: JSON, HTML, XML
 
-### Step 4: Verify Upload
+#### Step 4: Verify Upload
 
 1. Click **"Upload"** to submit
 2. Wait for processing (1-2 minutes)
 3. Verify scan appears in Concert dashboard
 4. Check vulnerability categorization
 
-### Step 5: Review Results in Concert
+#### Step 5: Review Results in Concert
 
 Concert will automatically:
 - ✅ Parse ZAP scan results
@@ -368,6 +415,57 @@ jq . ./security-reports/concert-security-scan-latest.json > /dev/null && echo "V
 **Check environment name:**
 - Must match existing Concert environment
 - Use exact name: `kubernetes_demo-turbo-instana-concert_production`
+
+#### 6. Automatic Concert Upload Fails
+
+**Symptoms:**
+```
+❌ FAILED: Authentication error (401 Unauthorized)
+❌ FAILED: Application not found (404 Not Found)
+⚠️  WARNING: Unexpected response code
+```
+
+**Solutions:**
+
+**Check Concert Secrets:**
+```bash
+# Verify secrets are set in Gitea
+# Repository → Settings → Secrets → Actions
+# Required secrets:
+#   - CONCERT_URL
+#   - CONCERT_API_KEY
+#   - CONCERT_INSTANCE_ID
+```
+
+**Test Concert API Connection:**
+```bash
+# Test authentication
+curl -X GET "${CONCERT_URL}/ingestion/api/v1/health" \
+  -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
+  -H "Authorization: C_API_KEY ${CONCERT_API_KEY}"
+```
+
+**Verify Application Exists:**
+```bash
+# Check if application exists in Concert
+curl -X GET "${CONCERT_URL}/core/api/v1/applications" \
+  -H "C_API_KEY: ${CONCERT_API_KEY}" \
+  -H "InstanceID: ${CONCERT_INSTANCE_ID}" | jq '.applications[] | select(.name=="demo-turbo-instana-concert")'
+```
+
+**Check Workflow Logs:**
+```bash
+# In Gitea, navigate to:
+# Repository → Actions → Latest Workflow Run → "Upload ZAP Results to Concert"
+# Look for detailed error messages and HTTP response codes
+```
+
+**Common Error Codes:**
+- `401`: Invalid API key or Instance ID
+- `404`: Application doesn't exist in Concert
+- `413`: File too large (>10 MB)
+- `500`: Concert server error (retry later)
+
 
 #### 6. Services Not Accessible
 
