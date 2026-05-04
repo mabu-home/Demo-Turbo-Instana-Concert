@@ -1444,6 +1444,31 @@ jobs:
           echo "  - ${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/echo-service:latest"
           echo "  - ${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/load-test-app:latest"
           echo "==================================="
+      # Step: Create Concert Credentials Secret from Gitea Secrets
+      - name: Create Concert Credentials Secret
+        if: secrets.CONCERT_URL != ''
+        run: |
+          echo "==================================="
+          echo "🔐 Creating Concert Credentials"
+          echo "==================================="
+          
+          # Delete existing secret if it exists
+          kubectl delete secret concert-credentials \
+            -n demo-turbo-instana-concert \
+            --ignore-not-found=true
+          
+          # Create secret from Gitea secrets
+          kubectl create secret generic concert-credentials \
+            --from-literal=url='${{ secrets.CONCERT_URL }}' \
+            --from-literal=api-key='${{ secrets.CONCERT_API_KEY }}' \
+            --from-literal=instance-id='${{ secrets.CONCERT_INSTANCE_ID }}' \
+            -n demo-turbo-instana-concert
+          
+          echo "✅ Concert credentials secret created"
+          echo "   URL: ${{ secrets.CONCERT_URL }}"
+          echo "   Instance ID: ${CONCERT_INSTANCE_ID:0:8}..."
+        continue-on-error: true
+      
       # Step: Run OWASP ZAP Security Scan
       - name: Deploy ZAP Security Scan
         run: |
@@ -1461,92 +1486,98 @@ jobs:
           echo "✓ ZAP scan job deployed"
           echo "Monitor progress: kubectl logs -f job/zap-full-scan -n demo-turbo-instana-concert"
       
-      - name: Wait for ZAP Scan Completion
+      - name: Deploy ZAP Uploader Job
+        if: secrets.CONCERT_URL != ''
         run: |
-          echo "Waiting for ZAP scan to start..."
-          sleep 15
+          echo "==================================="
+          echo "📤 Deploying ZAP Uploader Job"
+          echo "==================================="
           
-          # Get pod name
-          POD_NAME=$(kubectl get pods -n demo-turbo-instana-concert -l job-name=zap-full-scan -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          # Clean up any existing uploader jobs
+          kubectl delete job zap-uploader -n demo-turbo-instana-concert --ignore-not-found=true
+          sleep 2
           
-          if [ -z "$POD_NAME" ]; then
-            echo "⚠️  Warning: ZAP scan pod not found. Scan may still be starting."
-            exit 0
-          fi
+          # Deploy the uploader job (it will wait 30 min for scan completion)
+          kubectl apply -f k8s/zap-uploader-job.yaml
           
-          echo "ZAP scan pod: $POD_NAME"
-          echo "Waiting for pod to be ready..."
-          kubectl wait --for=condition=Ready pod/$POD_NAME -n demo-turbo-instana-concert --timeout=120s || true
-          
+          echo "✅ ZAP uploader job deployed"
           echo ""
-          echo "📊 ZAP Scan Progress (first 50 lines):"
-          kubectl logs pod/$POD_NAME -n demo-turbo-instana-concert --tail=50 || true
-          
+          echo "The uploader will:"
+          echo "  1. Wait 30 minutes for ZAP scan to complete"
+          echo "  2. Retrieve scan reports from the ZAP pod"
+          echo "  3. Upload results to Concert automatically"
           echo ""
-          echo "⏳ Scan is running in background. It will complete in 5-15 minutes."
-          echo "   The scan will continue even after this workflow completes."
+          echo "Monitor uploader progress:"
+          echo "  kubectl logs -f job/zap-uploader -n demo-turbo-instana-concert"
+          echo ""
+          echo "Check uploader status:"
+          echo "  kubectl get job zap-uploader -n demo-turbo-instana-concert"
         continue-on-error: true
       
-      - name: Retrieve ZAP Scan Results (if available)
+      - name: Check ZAP Scan Status
         run: |
-          echo "============================================"
-          echo "Waiting for ZAP Scan Completion"
-          echo "============================================"
-          echo ""
+          echo "==================================="
+          echo "📊 ZAP Scan Status"
+          echo "==================================="
           
-          # Wait up to 15 minutes for job completion
-          echo "⏳ Waiting for ZAP scan to complete (timeout: 15 minutes)..."
-          echo "This is a comprehensive security scan and may take time."
-          echo ""
-          
-          if kubectl wait --for=condition=complete job/zap-full-scan \
-            -n demo-turbo-instana-concert \
-            --timeout=900s 2>/dev/null; then
-            echo "✅ ZAP scan completed successfully!"
-          else
-            echo "⚠️  Scan did not complete within 15 minutes"
-            echo "Checking if reports are available anyway..."
-          fi
-          
-          echo ""
+          # Wait a moment for scan to start
+          sleep 10
           
           # Get pod name
           POD_NAME=$(kubectl get pods -n demo-turbo-instana-concert -l job-name=zap-full-scan -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
           
           if [ -z "$POD_NAME" ]; then
-            echo "⚠️  ZAP scan pod not found. Skipping report retrieval."
-            echo ""
-            echo "To retrieve reports manually after scan completes:"
-            echo "  ./scripts/upload-zap-to-concert.sh"
+            echo "⚠️  ZAP scan pod not found yet. It may still be starting."
             exit 0
           fi
           
           echo "ZAP scan pod: $POD_NAME"
+          echo ""
+          echo "📊 Recent scan output:"
+          kubectl logs pod/$POD_NAME -n demo-turbo-instana-concert --tail=30 || true
+          echo ""
+          echo "⏳ Scan is running in background (takes 20-30 minutes)"
+          echo "   The uploader job will automatically upload results when complete"
+          echo ""
+          echo "To monitor scan progress:"
+          echo "  kubectl logs -f pod/$POD_NAME -n demo-turbo-instana-concert"
+        continue-on-error: true
+      
+      - name: Retrieve ZAP Scan Results (Optional - for workflow artifacts)
+        run: |
+          echo "============================================"
+          echo "Checking for Completed ZAP Scan Results"
+          echo "============================================"
+          echo ""
+          echo "Note: This step is optional and non-blocking."
+          echo "The uploader job will handle the Concert upload automatically."
+          echo ""
           
-          # Check if scan completed
+          # Check if scan completed quickly (unlikely but possible)
           JOB_STATUS=$(kubectl get job zap-full-scan -n demo-turbo-instana-concert -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || echo "")
           
           if [ "$JOB_STATUS" != "True" ]; then
-            echo "⏳ ZAP scan is still running. Reports will be available later."
-            echo ""
-            echo "To retrieve and upload reports manually after scan completes:"
-            echo "  ./scripts/upload-zap-to-concert.sh"
-            echo ""
-            echo "Or retrieve reports manually:"
-            echo "  POD_NAME=\$(kubectl get pods -n demo-turbo-instana-concert -l job-name=zap-full-scan -o jsonpath='{.items[0].metadata.name}')"
-            echo "  kubectl -n demo-turbo-instana-concert cp \$POD_NAME:/zap/wrk/full-scan-report.html ./concert-security-scan.html"
-            echo "  kubectl -n demo-turbo-instana-concert cp \$POD_NAME:/zap/wrk/full-scan-report.json ./concert-security-scan.json"
+            echo "⏳ ZAP scan is still running (expected behavior)"
+            echo "   Results will be uploaded by the uploader job when ready"
             exit 0
           fi
           
-          echo "✓ ZAP scan completed! Retrieving reports..."
+          echo "✅ ZAP scan completed during workflow!"
+          
+          # Get pod name
+          POD_NAME=$(kubectl get pods -n demo-turbo-instana-concert -l job-name=zap-full-scan -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          
+          if [ -z "$POD_NAME" ]; then
+            echo "⚠️  Pod not found"
+            exit 0
+          fi
           
           # Create output directory
           mkdir -p security-reports
           
-          # Copy reports
+          # Try to copy reports for workflow artifacts
           if kubectl -n demo-turbo-instana-concert cp $POD_NAME:/zap/wrk/full-scan-report.html ./security-reports/concert-security-scan.html 2>/dev/null; then
-            echo "✓ HTML report retrieved"
+            echo "✓ HTML report retrieved for artifacts"
             ls -lh ./security-reports/concert-security-scan.html
           else
             echo "⚠️  Failed to retrieve HTML report"
