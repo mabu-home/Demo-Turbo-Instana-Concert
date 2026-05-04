@@ -1,0 +1,270 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zap-uploader
+  namespace: demo-turbo-instana-concert
+  labels:
+    app: zap-uploader
+    component: security-upload
+spec:
+  # Clean up completed jobs after 1 hour
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: zap-uploader
+    spec:
+      # Wait 30 minutes before starting (1800 seconds)
+      # This gives ZAP scan time to complete
+      initContainers:
+      - name: wait-for-scan
+        image: busybox:1.36
+        command: 
+          - sh
+          - -c
+          - |
+            echo "Waiting 30 minutes for ZAP scan to complete..."
+            echo "Start time: $(date)"
+            sleep 1800
+            echo "Wait complete: $(date)"
+            echo "Proceeding to upload..."
+      
+      containers:
+      - name: uploader
+        image: curlimages/curl:8.5.0
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -e
+            
+            echo "============================================"
+            echo "ZAP Scan Results Uploader"
+            echo "============================================"
+            echo "Time: $(date)"
+            echo ""
+            
+            # Verify Concert credentials are available
+            if [ -z "$CONCERT_URL" ]; then
+              echo "❌ ERROR: CONCERT_URL not set"
+              exit 1
+            fi
+            
+            if [ -z "$CONCERT_API_KEY" ]; then
+              echo "❌ ERROR: CONCERT_API_KEY not set"
+              exit 1
+            fi
+            
+            if [ -z "$CONCERT_INSTANCE_ID" ]; then
+              echo "❌ ERROR: CONCERT_INSTANCE_ID not set"
+              exit 1
+            fi
+            
+            echo "✓ Concert credentials configured"
+            echo "  URL: $CONCERT_URL"
+            echo "  Instance ID: ${CONCERT_INSTANCE_ID:0:8}..."
+            echo ""
+            
+            # Install kubectl
+            echo "Installing kubectl..."
+            cd /tmp
+            curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            export PATH="/tmp:$PATH"
+            echo "✓ kubectl installed"
+            echo ""
+            
+            # Check if ZAP scan job exists and completed
+            echo "Checking ZAP scan status..."
+            if ! kubectl get job zap-full-scan -n demo-turbo-instana-concert &>/dev/null; then
+              echo "⚠️  ZAP scan job not found. It may not have been deployed yet."
+              exit 0
+            fi
+            
+            JOB_STATUS=$(kubectl get job zap-full-scan -n demo-turbo-instana-concert \
+              -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || echo "")
+            
+            if [ "$JOB_STATUS" != "True" ]; then
+              echo "⚠️  ZAP scan has not completed yet"
+              echo "Job status: $JOB_STATUS"
+              echo "The scan may still be running or may have failed"
+              echo "Check with: kubectl get job zap-full-scan -n demo-turbo-instana-concert"
+              exit 0
+            fi
+            
+            echo "✓ ZAP scan completed successfully"
+            echo ""
+            
+            # Get ZAP pod name
+            echo "Locating ZAP scan pod..."
+            POD_NAME=$(kubectl get pods -n demo-turbo-instana-concert \
+              -l job-name=zap-full-scan \
+              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            
+            if [ -z "$POD_NAME" ]; then
+              echo "❌ ERROR: Could not find ZAP scan pod"
+              exit 1
+            fi
+            
+            echo "✓ Found pod: $POD_NAME"
+            echo ""
+            
+            # Copy ZAP reports from pod
+            echo "Retrieving ZAP scan reports..."
+            mkdir -p /tmp/reports
+            
+            # Try JSON report first
+            if kubectl -n demo-turbo-instana-concert cp \
+              $POD_NAME:/zap/wrk/full-scan-report.json \
+              /tmp/reports/zap-report.json 2>/dev/null; then
+              echo "✓ JSON report retrieved"
+              REPORT_FILE="/tmp/reports/zap-report.json"
+              REPORT_FORMAT="json"
+            elif kubectl -n demo-turbo-instana-concert cp \
+              $POD_NAME:/zap/wrk/full-scan-report.html \
+              /tmp/reports/zap-report.html 2>/dev/null; then
+              echo "✓ HTML report retrieved (fallback)"
+              REPORT_FILE="/tmp/reports/zap-report.html"
+              REPORT_FORMAT="html"
+            else
+              echo "❌ ERROR: Could not retrieve any ZAP reports"
+              echo "Checking what files exist in pod..."
+              kubectl exec -n demo-turbo-instana-concert $POD_NAME -- ls -lh /zap/wrk/ || true
+              exit 1
+            fi
+            
+            # Check file size
+            FILE_SIZE=$(ls -lh "$REPORT_FILE" | awk '{print $5}')
+            echo "  File: $REPORT_FILE"
+            echo "  Size: $FILE_SIZE"
+            echo ""
+            
+            # Verify file is not empty
+            if [ ! -s "$REPORT_FILE" ]; then
+              echo "❌ ERROR: Report file is empty"
+              exit 1
+            fi
+            
+            # Upload to Concert using Ingestion API
+            echo "Uploading to IBM Concert..."
+            echo "Endpoint: ${CONCERT_URL}/ingestion/api/v1/upload_files"
+            echo ""
+            
+            HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/concert-response.json \
+              -X POST "${CONCERT_URL}/ingestion/api/v1/upload_files" \
+              -H "accept: application/json" \
+              -H "Content-Type: multipart/form-data" \
+              -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
+              -H "Authorization: C_API_KEY ${CONCERT_API_KEY}" \
+              -F "data_type=dynamic_code_scan" \
+              -F "filename=@${REPORT_FILE}" \
+              -F 'metadata={"env_name":"prod","tool":"zap","format":"'${REPORT_FORMAT}'","scan_type":"dast","access_point":"concert.lab.allwaysbeginner.com","application":"demo-turbo-instana-concert"}' \
+              --connect-timeout 10 \
+              --max-time 120)
+            
+            echo "HTTP Response Code: ${HTTP_CODE}"
+            echo ""
+            
+            # Check response
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "202" ]; then
+              echo "============================================"
+              echo "✅ SUCCESS!"
+              echo "============================================"
+              echo ""
+              echo "ZAP scan results uploaded to Concert"
+              echo ""
+              echo "Response:"
+              cat /tmp/concert-response.json 2>/dev/null || echo "No response body"
+              echo ""
+              echo "View results in Concert:"
+              echo "  ${CONCERT_URL}/applications/demo-turbo-instana-concert"
+              echo ""
+            elif [ "$HTTP_CODE" = "401" ]; then
+              echo "❌ FAILED: Authentication error (401 Unauthorized)"
+              echo "Please verify Concert credentials in secret"
+              cat /tmp/concert-response.json 2>/dev/null || true
+              exit 1
+            elif [ "$HTTP_CODE" = "404" ]; then
+              echo "❌ FAILED: Application not found (404 Not Found)"
+              echo "Please ensure 'demo-turbo-instana-concert' exists in Concert"
+              cat /tmp/concert-response.json 2>/dev/null || true
+              exit 1
+            else
+              echo "⚠️  WARNING: Unexpected response code: ${HTTP_CODE}"
+              echo "Response:"
+              cat /tmp/concert-response.json 2>/dev/null || echo "No response body"
+              exit 1
+            fi
+        
+        env:
+        # Concert credentials from Kubernetes secret
+        - name: CONCERT_URL
+          valueFrom:
+            secretKeyRef:
+              name: concert-credentials
+              key: url
+        - name: CONCERT_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: concert-credentials
+              key: api-key
+        - name: CONCERT_INSTANCE_ID
+          valueFrom:
+            secretKeyRef:
+              name: concert-credentials
+              key: instance-id
+        
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      
+      restartPolicy: OnFailure
+      serviceAccountName: zap-uploader-sa
+
+---
+# ServiceAccount for the uploader job
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zap-uploader-sa
+  namespace: demo-turbo-instana-concert
+
+---
+# Role to access ZAP scan job and pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: zap-uploader-role
+  namespace: demo-turbo-instana-concert
+rules:
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: zap-uploader-binding
+  namespace: demo-turbo-instana-concert
+subjects:
+- kind: ServiceAccount
+  name: zap-uploader-sa
+  namespace: demo-turbo-instana-concert
+roleRef:
+  kind: Role
+  name: zap-uploader-role
+  apiGroup: rbac.authorization.k8s.io
+
+# Made with Bob

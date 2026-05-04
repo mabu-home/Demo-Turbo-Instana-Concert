@@ -1570,6 +1570,58 @@ jobs:
           echo "   - Upload the JSON or HTML report"
         continue-on-error: true
       
+      # Step: Deploy Automated ZAP Uploader Job
+      - name: Deploy Automated ZAP Uploader
+        run: |
+          echo "============================================"
+          echo "Deploying Automated ZAP Uploader Job"
+          echo "============================================"
+          echo ""
+          echo "This job will:"
+          echo "  1. Wait 30 minutes for ZAP scan to complete"
+          echo "  2. Retrieve scan reports from ZAP pod"
+          echo "  3. Upload results to IBM Concert automatically"
+          echo ""
+          
+          # Check if Concert credentials secret exists
+          if kubectl get secret concert-credentials -n demo-turbo-instana-concert &>/dev/null; then
+            echo "✓ Concert credentials secret found"
+            
+            # Deploy the uploader job
+            kubectl apply -f k8s/zap-uploader-job.yaml
+            
+            echo ""
+            echo "✅ Automated uploader deployed successfully!"
+            echo ""
+            echo "The uploader will:"
+            echo "  - Start in 30 minutes"
+            echo "  - Check if ZAP scan completed"
+            echo "  - Upload results to Concert"
+            echo ""
+            echo "Monitor progress:"
+            echo "  kubectl logs -l app=zap-uploader -n demo-turbo-instana-concert -f"
+            echo ""
+            echo "Check status:"
+            echo "  kubectl get job zap-uploader -n demo-turbo-instana-concert"
+          else
+            echo "⚠️  WARNING: concert-credentials secret not found"
+            echo ""
+            echo "The automated uploader requires Concert credentials."
+            echo "Create the secret with:"
+            echo ""
+            echo "  kubectl create secret generic concert-credentials \\"
+            echo "    --from-literal=url=\"\$CONCERT_URL\" \\"
+            echo "    --from-literal=api-key=\"\$CONCERT_API_KEY\" \\"
+            echo "    --from-literal=instance-id=\"\$CONCERT_INSTANCE_ID\" \\"
+            echo "    -n demo-turbo-instana-concert"
+            echo ""
+            echo "Then deploy the uploader:"
+            echo "  kubectl apply -f k8s/zap-uploader-job.yaml"
+            echo ""
+            echo "Skipping automated uploader deployment..."
+          fi
+        continue-on-error: true
+      
       # Step: Upload ZAP Results to Concert
       - name: Upload ZAP Results to Concert
         if: secrets.CONCERT_URL != ''
