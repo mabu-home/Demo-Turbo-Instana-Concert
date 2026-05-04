@@ -1489,18 +1489,39 @@ jobs:
       
       - name: Retrieve ZAP Scan Results (if available)
         run: |
-          echo "Attempting to retrieve ZAP scan results..."
+          echo "============================================"
+          echo "Waiting for ZAP Scan Completion"
+          echo "============================================"
+          echo ""
           
-          # Wait a bit more for scan to potentially complete
-          sleep 30
+          # Wait up to 15 minutes for job completion
+          echo "⏳ Waiting for ZAP scan to complete (timeout: 15 minutes)..."
+          echo "This is a comprehensive security scan and may take time."
+          echo ""
+          
+          if kubectl wait --for=condition=complete job/zap-full-scan \
+            -n demo-turbo-instana-concert \
+            --timeout=900s 2>/dev/null; then
+            echo "✅ ZAP scan completed successfully!"
+          else
+            echo "⚠️  Scan did not complete within 15 minutes"
+            echo "Checking if reports are available anyway..."
+          fi
+          
+          echo ""
           
           # Get pod name
           POD_NAME=$(kubectl get pods -n demo-turbo-instana-concert -l job-name=zap-full-scan -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
           
           if [ -z "$POD_NAME" ]; then
             echo "⚠️  ZAP scan pod not found. Skipping report retrieval."
+            echo ""
+            echo "To retrieve reports manually after scan completes:"
+            echo "  ./scripts/upload-zap-to-concert.sh"
             exit 0
           fi
+          
+          echo "ZAP scan pod: $POD_NAME"
           
           # Check if scan completed
           JOB_STATUS=$(kubectl get job zap-full-scan -n demo-turbo-instana-concert -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || echo "")
@@ -1508,7 +1529,10 @@ jobs:
           if [ "$JOB_STATUS" != "True" ]; then
             echo "⏳ ZAP scan is still running. Reports will be available later."
             echo ""
-            echo "To retrieve reports manually after scan completes:"
+            echo "To retrieve and upload reports manually after scan completes:"
+            echo "  ./scripts/upload-zap-to-concert.sh"
+            echo ""
+            echo "Or retrieve reports manually:"
             echo "  POD_NAME=\$(kubectl get pods -n demo-turbo-instana-concert -l job-name=zap-full-scan -o jsonpath='{.items[0].metadata.name}')"
             echo "  kubectl -n demo-turbo-instana-concert cp \$POD_NAME:/zap/wrk/full-scan-report.html ./concert-security-scan.html"
             echo "  kubectl -n demo-turbo-instana-concert cp \$POD_NAME:/zap/wrk/full-scan-report.json ./concert-security-scan.json"

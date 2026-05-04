@@ -2,6 +2,8 @@
 
 Integrated demo for **Instana**, **Turbonomic**, **IBM Concert**, and **Granite AI** on Kubernetes.
 
+> **⚠️ ZAP Scan Upload Issue?** See [ZAP Upload Troubleshooting Guide](docs/ZAP_UPLOAD_TROUBLESHOOTING.md) for solutions.
+
 ## Architecture
 
 ```
@@ -60,13 +62,15 @@ make status
 │   ├── deploy.sh
 │   ├── apply-concert-patch.sh
 │   ├── diagnose-sbom.sh            # SBOM troubleshooting tool
-│   └── run-zap-scan.sh             # Automated ZAP security scan
+│   ├── run-zap-scan.sh             # Automated ZAP security scan
+│   └── upload-zap-to-concert.sh    # Upload ZAP results to Concert
 ├── concert-patches/            # IBM Concert remediation patches
 ├── docs/                       # Documentation
 │   ├── CONCERT_INTEGRATION.md      # Concert SAST & SBOM setup
 │   ├── CONCERT_SECRETS_SETUP.md    # Quick secrets configuration
 │   ├── SBOM_TROUBLESHOOTING.md     # SBOM upload troubleshooting
 │   ├── ZAP_SECURITY_SCAN_GUIDE.md  # OWASP ZAP scan & Concert upload
+│   ├── ZAP_UPLOAD_TROUBLESHOOTING.md  # Fix ZAP upload issues
 │   └── GITEA_DEPLOYMENT_GUIDE.md   # Gitea CI/CD setup
 ├── Makefile                    # Build + push + deploy shortcuts
 └── README.md
