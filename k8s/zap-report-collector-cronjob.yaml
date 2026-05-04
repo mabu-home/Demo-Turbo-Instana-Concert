@@ -38,21 +38,36 @@ spec:
               echo "🔍 ZAP Report Collector - $(date)"
               echo "================================================"
               
-              # Check if ZAP scan job exists and is completed
+              # Configuration
+              MAX_WAIT_TIME=1800  # 30 minutes max wait
+              CHECK_INTERVAL=60   # Check every 60 seconds
+              ELAPSED=0
+              
+              # Check if ZAP scan job exists
               if ! kubectl get job zap-full-scan -n demo-turbo-instana-concert &>/dev/null; then
                 echo "ℹ️  No ZAP scan job found. Nothing to collect."
                 exit 0
               fi
               
-              # Get job status
-              JOB_STATUS=$(kubectl get job zap-full-scan -n demo-turbo-instana-concert -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || echo "")
+              echo "📊 ZAP scan job found. Checking status..."
               
-              if [ "$JOB_STATUS" != "True" ]; then
+              # Wait for scan completion with retry logic
+              while [ $ELAPSED -lt $MAX_WAIT_TIME ]; do
+                # Get job status
+                JOB_STATUS=$(kubectl get job zap-full-scan -n demo-turbo-instana-concert -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || echo "")
+                
+                if [ "$JOB_STATUS" = "True" ]; then
+                  echo "✅ ZAP scan completed successfully!"
+                  break
+                fi
+                
                 # Check if job is still running
                 ACTIVE=$(kubectl get job zap-full-scan -n demo-turbo-instana-concert -o jsonpath='{.status.active}' 2>/dev/null || echo "0")
                 if [ "$ACTIVE" -gt 0 ]; then
-                  echo "⏳ ZAP scan is still running. Will check again in 15 minutes."
-                  exit 0
+                  echo "⏳ ZAP scan is still running... (waited ${ELAPSED}s / ${MAX_WAIT_TIME}s)"
+                  sleep $CHECK_INTERVAL
+                  ELAPSED=$((ELAPSED + CHECK_INTERVAL))
+                  continue
                 fi
                 
                 # Check if job failed
@@ -62,7 +77,16 @@ spec:
                   exit 1
                 fi
                 
-                echo "ℹ️  ZAP scan not yet complete. Will check again in 15 minutes."
+                # Job exists but not active and not complete - might be pending
+                echo "⏳ Waiting for scan to start or complete... (waited ${ELAPSED}s / ${MAX_WAIT_TIME}s)"
+                sleep $CHECK_INTERVAL
+                ELAPSED=$((ELAPSED + CHECK_INTERVAL))
+              done
+              
+              # Check if we timed out
+              if [ $ELAPSED -ge $MAX_WAIT_TIME ]; then
+                echo "⚠️  Timeout waiting for scan completion after ${MAX_WAIT_TIME}s"
+                echo "ℹ️  Scan may still be running. Will retry in next CronJob execution."
                 exit 0
               fi
               

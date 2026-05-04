@@ -42,24 +42,51 @@ echo "  URL: $CONCERT_URL"
 echo "  Instance ID: ${CONCERT_INSTANCE_ID:0:8}..."
 echo ""
 
-# Step 1: Wait for scan completion
+# Step 1: Wait for scan completion with retry logic
 echo -e "${YELLOW}Step 1: Waiting for ZAP scan to complete...${NC}"
 echo "This may take up to 15 minutes..."
 
-if kubectl wait --for=condition=complete job/$JOB_NAME -n $NAMESPACE --timeout=900s 2>/dev/null; then
-    echo -e "${GREEN}✓ ZAP scan completed successfully${NC}"
-else
-    echo -e "${YELLOW}⚠️  Scan did not complete within timeout${NC}"
-    echo "Checking if reports are available anyway..."
-fi
+MAX_RETRIES=3
+RETRY_COUNT=0
+WAIT_TIMEOUT=900  # 15 minutes
 
-# Step 2: Get pod name
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if kubectl wait --for=condition=complete job/$JOB_NAME -n $NAMESPACE --timeout=${WAIT_TIMEOUT}s 2>/dev/null; then
+        echo -e "${GREEN}✓ ZAP scan completed successfully${NC}"
+        break
+    else
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+            echo -e "${YELLOW}⚠️  Scan not complete yet. Retry $RETRY_COUNT/$MAX_RETRIES...${NC}"
+            echo "Waiting 60 seconds before retry..."
+            sleep 60
+        else
+            echo -e "${YELLOW}⚠️  Scan did not complete within timeout${NC}"
+            echo "Checking if reports are available anyway..."
+        fi
+    fi
+done
+
+# Step 2: Get pod name with retry
 echo ""
 echo -e "${YELLOW}Step 2: Locating ZAP scan pod...${NC}"
-POD_NAME=$(kubectl get pods -n $NAMESPACE -l job-name=$JOB_NAME -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+RETRY_COUNT=0
+POD_NAME=""
+while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ -z "$POD_NAME" ]; do
+    POD_NAME=$(kubectl get pods -n $NAMESPACE -l job-name=$JOB_NAME -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    
+    if [ -z "$POD_NAME" ]; then
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+            echo -e "${YELLOW}⚠️  Pod not found. Retry $RETRY_COUNT/$MAX_RETRIES...${NC}"
+            sleep 30
+        fi
+    fi
+done
 
 if [ -z "$POD_NAME" ]; then
-    echo -e "${RED}ERROR: ZAP scan pod not found${NC}"
+    echo -e "${RED}ERROR: ZAP scan pod not found after $MAX_RETRIES retries${NC}"
     echo "Make sure the ZAP scan job has been deployed:"
     echo "  kubectl get job $JOB_NAME -n $NAMESPACE"
     exit 1
@@ -67,35 +94,63 @@ fi
 
 echo -e "${GREEN}✓ Found pod: $POD_NAME${NC}"
 
-# Step 3: Retrieve reports
+# Step 3: Retrieve reports with retry logic
 echo ""
 echo -e "${YELLOW}Step 3: Retrieving scan reports...${NC}"
 mkdir -p "$OUTPUT_DIR"
 
-# Try to copy JSON report
-JSON_REPORT="$OUTPUT_DIR/concert-security-scan.json"
-if kubectl -n $NAMESPACE cp $POD_NAME:/zap/wrk/full-scan-report.json "$JSON_REPORT" 2>/dev/null; then
-    echo -e "${GREEN}✓ JSON report retrieved${NC}"
-    FILE_SIZE=$(ls -lh "$JSON_REPORT" | awk '{print $5}')
-    echo "  File: $JSON_REPORT"
-    echo "  Size: $FILE_SIZE"
-else
-    echo -e "${RED}✗ Failed to retrieve JSON report${NC}"
+RETRY_COUNT=0
+REPORT_RETRIEVED=false
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$REPORT_RETRIEVED" = "false" ]; do
+    # Try to copy JSON report
+    JSON_REPORT="$OUTPUT_DIR/concert-security-scan.json"
+    if kubectl -n $NAMESPACE cp $POD_NAME:/zap/wrk/full-scan-report.json "$JSON_REPORT" 2>/dev/null; then
+        if [ -s "$JSON_REPORT" ]; then
+            echo -e "${GREEN}✓ JSON report retrieved${NC}"
+            FILE_SIZE=$(ls -lh "$JSON_REPORT" | awk '{print $5}')
+            echo "  File: $JSON_REPORT"
+            echo "  Size: $FILE_SIZE"
+            REPORT_RETRIEVED=true
+            break
+        fi
+    fi
     
     # Try HTML as fallback
     HTML_REPORT="$OUTPUT_DIR/concert-security-scan.html"
     if kubectl -n $NAMESPACE cp $POD_NAME:/zap/wrk/full-scan-report.html "$HTML_REPORT" 2>/dev/null; then
-        echo -e "${GREEN}✓ HTML report retrieved (fallback)${NC}"
-        JSON_REPORT="$HTML_REPORT"
-        FILE_SIZE=$(ls -lh "$HTML_REPORT" | awk '{print $5}')
-        echo "  File: $HTML_REPORT"
-        echo "  Size: $FILE_SIZE"
-    else
-        echo -e "${RED}ERROR: No reports available${NC}"
-        echo "Check pod logs:"
-        echo "  kubectl logs $POD_NAME -n $NAMESPACE"
-        exit 1
+        if [ -s "$HTML_REPORT" ]; then
+            echo -e "${GREEN}✓ HTML report retrieved (fallback)${NC}"
+            JSON_REPORT="$HTML_REPORT"
+            FILE_SIZE=$(ls -lh "$HTML_REPORT" | awk '{print $5}')
+            echo "  File: $HTML_REPORT"
+            echo "  Size: $FILE_SIZE"
+            REPORT_RETRIEVED=true
+            break
+        fi
     fi
+    
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+        echo -e "${YELLOW}⚠️  Reports not available yet. Retry $RETRY_COUNT/$MAX_RETRIES...${NC}"
+        echo "Scan may still be generating reports. Waiting 60 seconds..."
+        sleep 60
+    fi
+done
+
+if [ "$REPORT_RETRIEVED" = "false" ]; then
+    echo -e "${RED}ERROR: No reports available after $MAX_RETRIES retries${NC}"
+    echo ""
+    echo "Troubleshooting steps:"
+    echo "  1. Check if scan is still running:"
+    echo "     kubectl get job $JOB_NAME -n $NAMESPACE"
+    echo "  2. Check pod status:"
+    echo "     kubectl get pod $POD_NAME -n $NAMESPACE"
+    echo "  3. Check pod logs:"
+    echo "     kubectl logs $POD_NAME -n $NAMESPACE"
+    echo "  4. Check if reports exist in pod:"
+    echo "     kubectl exec $POD_NAME -n $NAMESPACE -- ls -la /zap/wrk/"
+    exit 1
 fi
 
 # Verify file is not empty
