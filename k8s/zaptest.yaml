@@ -56,11 +56,11 @@ spec:
           mountPath: /zap/wrk
         resources:
           requests:
-            memory: "1Gi"
-            cpu: "500m"
+            memory: "1536Mi"
+            cpu: "750m"
           limits:
-            memory: "2Gi"
-            cpu: "1000m"
+            memory: "3Gi"
+            cpu: "1500m"
       volumes:
       - name: zap-storage
         emptyDir: {}
