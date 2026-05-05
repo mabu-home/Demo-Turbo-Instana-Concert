@@ -1,0 +1,127 @@
+{
+  "@version": "2.11.1",
+  "@generated": "Mon, 4 May 2026 17:25:00",
+  "site": [{
+    "@name": "http://concert.lab.allwaysbeginner.com",
+    "@host": "concert.lab.allwaysbeginner.com",
+    "@port": "80",
+    "@ssl": "false",
+    "alerts": [
+      {
+        "pluginid": "10021",
+        "alertRef": "10021",
+        "alert": "X-Content-Type-Options Header Missing",
+        "name": "X-Content-Type-Options Header Missing",
+        "riskcode": "1",
+        "confidence": "2",
+        "riskdesc": "Low (Medium)",
+        "desc": "The Anti-MIME-Sniffing header X-Content-Type-Options was not set to 'nosniff'. This allows older versions of Internet Explorer and Chrome to perform MIME-sniffing on the response body, potentially causing the response body to be interpreted and displayed as a content type other than the declared content type.",
+        "instances": [{
+          "uri": "http://concert.lab.allwaysbeginner.com",
+          "method": "GET",
+          "param": "",
+          "attack": "",
+          "evidence": ""
+        }],
+        "count": "1",
+        "solution": "Ensure that the application/web server sets the Content-Type header appropriately, and that it sets the X-Content-Type-Options header to 'nosniff' for all web pages.",
+        "reference": "https://owasp.org/www-project-secure-headers/\nhttps://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Content-Type-Options",
+        "cweid": "693",
+        "wascid": "15",
+        "sourceid": "3"
+      },
+      {
+        "pluginid": "10035",
+        "alertRef": "10035",
+        "alert": "Strict-Transport-Security Header Not Set",
+        "name": "Strict-Transport-Security Header Not Set",
+        "riskcode": "1",
+        "confidence": "3",
+        "riskdesc": "Low (High)",
+        "desc": "HTTP Strict Transport Security (HSTS) is a web security policy mechanism whereby a web server declares that complying user agents (such as a web browser) are to interact with it using only secure HTTPS connections (i.e. HTTP layered over TLS/SSL).",
+        "instances": [{
+          "uri": "http://concert.lab.allwaysbeginner.com",
+          "method": "GET",
+          "param": "",
+          "attack": "",
+          "evidence": ""
+        }],
+        "count": "1",
+        "solution": "Ensure that your web server, application server, load balancer, etc. is configured to enforce Strict-Transport-Security.",
+        "reference": "https://owasp.org/www-community/Security_Headers\nhttps://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security",
+        "cweid": "319",
+        "wascid": "15",
+        "sourceid": "3"
+      },
+      {
+        "pluginid": "10098",
+        "alertRef": "10098",
+        "alert": "Cross-Domain Misconfiguration",
+        "name": "Cross-Domain Misconfiguration",
+        "riskcode": "2",
+        "confidence": "2",
+        "riskdesc": "Medium (Medium)",
+        "desc": "Web browser data loading may be possible, due to a Cross Origin Resource Sharing (CORS) misconfiguration on the web server",
+        "instances": [{
+          "uri": "http://concert.lab.allwaysbeginner.com/api/v1/data",
+          "method": "GET",
+          "param": "",
+          "attack": "",
+          "evidence": "Access-Control-Allow-Origin: *"
+        }],
+        "count": "1",
+        "solution": "Ensure that sensitive data is not available in an unauthenticated manner (using IP address white-listing, for instance).\nConfigure the 'Access-Control-Allow-Origin' HTTP header to a more restrictive set of domains, or remove all CORS headers entirely.",
+        "reference": "https://vulncat.fortify.com/en/detail?id=desc.config.dotnet.html5_overly_permissive_cors_policy",
+        "cweid": "264",
+        "wascid": "14",
+        "sourceid": "3"
+      },
+      {
+        "pluginid": "40012",
+        "alertRef": "40012",
+        "alert": "Cross Site Scripting (Reflected)",
+        "name": "Cross Site Scripting (Reflected)",
+        "riskcode": "3",
+        "confidence": "2",
+        "riskdesc": "High (Medium)",
+        "desc": "Cross-site Scripting (XSS) is an attack technique that involves echoing attacker-supplied code into a user's browser instance. A browser instance can be a standard web browser client, or a browser object embedded in a software product such as the browser within WinAmp, an RSS reader, or an email client.",
+        "instances": [{
+          "uri": "http://concert.lab.allwaysbeginner.com/search?q=test",
+          "method": "GET",
+          "param": "q",
+          "attack": "<script>alert(1)</script>",
+          "evidence": "<script>alert(1)</script>"
+        }],
+        "count": "1",
+        "solution": "Phase: Architecture and Design\nUse a vetted library or framework that does not allow this weakness to occur or provides constructs that make this weakness easier to avoid.\nExamples of libraries and frameworks that make it easier to generate properly encoded output include Microsoft's Anti-XSS library, the OWASP ESAPI Encoding module, and Apache Wicket.",
+        "reference": "https://owasp.org/www-community/attacks/xss/",
+        "cweid": "79",
+        "wascid": "8",
+        "sourceid": "1"
+      },
+      {
+        "pluginid": "90022",
+        "alertRef": "90022",
+        "alert": "Application Error Disclosure",
+        "name": "Application Error Disclosure",
+        "riskcode": "1",
+        "confidence": "2",
+        "riskdesc": "Low (Medium)",
+        "desc": "This page contains an error/warning message that may disclose sensitive information like the location of the file that produced the unhandled exception. This information can be used to launch further attacks against the web application.",
+        "instances": [{
+          "uri": "http://concert.lab.allwaysbeginner.com/error",
+          "method": "GET",
+          "param": "",
+          "attack": "",
+          "evidence": "Internal Server Error"
+        }],
+        "count": "1",
+        "solution": "Review the source code of this page. Implement custom error pages. Consider implementing a mechanism to provide a unique error reference/identifier to the client (browser) while logging the details on the server side and not exposing them to the user.",
+        "reference": "https://owasp.org/www-project-web-security-testing-guide/v41/4-Web_Application_Security_Testing/08-Testing_for_Error_Handling/01-Testing_for_Error_Code",
+        "cweid": "200",
+        "wascid": "13",
+        "sourceid": "3"
+      }
+    ]
+  }]
+}

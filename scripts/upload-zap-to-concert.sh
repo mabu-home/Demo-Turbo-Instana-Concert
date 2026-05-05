@@ -183,8 +183,8 @@ echo "Endpoint: ${CONCERT_URL}/ingestion/api/v1/upload_files"
 # Determine file extension
 FILE_EXT="${JSON_REPORT##*.}"
 
-# Create metadata
-METADATA="{\"env_name\":\"prod\",\"tool\":\"zap\",\"format\":\"${FILE_EXT}\",\"scan_type\":\"dast\",\"access_point\":\"concert.lab.allwaysbeginner.com\",\"application\":\"demo-turbo-instana-concert\"}"
+# Create metadata with correct Concert format
+METADATA="{\"env_name\":\"instanak3s\",\"access_point_name\":\"concert1\",\"access_point_url\":\"http://concert1.lab.allwaysbeginner.com\"}"
 
 # Upload with detailed error handling
 HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/concert-zap-response.json \
@@ -193,7 +193,7 @@ HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/concert-zap-response.json \
     -H "Content-Type: multipart/form-data" \
     -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
     -H "Authorization: C_API_KEY ${CONCERT_API_KEY}" \
-    -F "data_type=dynamic_code_scan" \
+    -F "data_type=dynamic_scan" \
     -F "filename=@${JSON_REPORT}" \
     -F "metadata=${METADATA}" \
     --connect-timeout 10 \

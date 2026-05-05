@@ -156,9 +156,9 @@ spec:
               -H "Content-Type: multipart/form-data" \
               -H "InstanceID: ${CONCERT_INSTANCE_ID}" \
               -H "Authorization: C_API_KEY ${CONCERT_API_KEY}" \
-              -F "data_type=dynamic_code_scan" \
+              -F "data_type=dynamic_scan" \
               -F "filename=@${REPORT_FILE}" \
-              -F 'metadata={"env_name":"prod","tool":"zap","format":"'${REPORT_FORMAT}'","scan_type":"dast","access_point":"concert.lab.allwaysbeginner.com","application":"demo-turbo-instana-concert"}' \
+              -F 'metadata={"env_name":"instanak3s","access_point_name":"concert1","access_point_url":"http://concert1.lab.allwaysbeginner.com"}' \
               --connect-timeout 10 \
               --max-time 120)
             

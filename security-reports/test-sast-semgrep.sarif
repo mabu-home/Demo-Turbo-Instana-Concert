@@ -1,0 +1,277 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Semgrep",
+          "version": "1.45.0",
+          "informationUri": "https://semgrep.dev",
+          "rules": [
+            {
+              "id": "python.lang.security.audit.dangerous-system-call.dangerous-system-call",
+              "name": "dangerous-system-call",
+              "shortDescription": {
+                "text": "Dangerous system call detected"
+              },
+              "fullDescription": {
+                "text": "Detected a dangerous system call that could lead to command injection vulnerabilities."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": ["security", "command-injection"],
+                "precision": "high"
+              }
+            },
+            {
+              "id": "python.flask.security.audit.hardcoded-secret.hardcoded-secret",
+              "name": "hardcoded-secret",
+              "shortDescription": {
+                "text": "Hardcoded secret detected"
+              },
+              "fullDescription": {
+                "text": "A hardcoded secret was found in the source code. This is a security risk."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": ["security", "secrets"],
+                "precision": "high"
+              }
+            },
+            {
+              "id": "python.lang.security.audit.sql-injection.sql-injection",
+              "name": "sql-injection",
+              "shortDescription": {
+                "text": "SQL injection vulnerability"
+              },
+              "fullDescription": {
+                "text": "Detected potential SQL injection vulnerability. User input is used in SQL query without proper sanitization."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": ["security", "sql-injection"],
+                "precision": "high"
+              }
+            },
+            {
+              "id": "python.flask.security.audit.xss.template-unescaped-with-safe.template-unescaped-with-safe",
+              "name": "xss-template",
+              "shortDescription": {
+                "text": "XSS vulnerability in template"
+              },
+              "fullDescription": {
+                "text": "Template variable marked as safe without proper escaping, leading to XSS vulnerability."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": ["security", "xss"],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "python.lang.security.audit.insecure-hash-function.insecure-hash-function",
+              "name": "insecure-hash",
+              "shortDescription": {
+                "text": "Insecure hash function"
+              },
+              "fullDescription": {
+                "text": "MD5 or SHA1 hash functions are cryptographically broken and should not be used."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": ["security", "cryptography"],
+                "precision": "high"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "python.lang.security.audit.dangerous-system-call.dangerous-system-call",
+          "level": "error",
+          "message": {
+            "text": "Dangerous use of os.system() with user input. This could lead to command injection."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "python-app/app.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 45,
+                  "startColumn": 5,
+                  "endLine": 45,
+                  "endColumn": 35,
+                  "snippet": {
+                    "text": "os.system(f'echo {user_input}')"
+                  }
+                }
+              }
+            }
+          ],
+          "fixes": [
+            {
+              "description": {
+                "text": "Use subprocess.run() with shell=False instead"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "python.flask.security.audit.hardcoded-secret.hardcoded-secret",
+          "level": "error",
+          "message": {
+            "text": "Hardcoded secret key found. Store secrets in environment variables or secret management system."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "python-app/app.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12,
+                  "startColumn": 1,
+                  "endLine": 12,
+                  "endColumn": 50,
+                  "snippet": {
+                    "text": "SECRET_KEY = 'hardcoded-secret-key-12345'"
+                  }
+                }
+              }
+            }
+          ],
+          "fixes": [
+            {
+              "description": {
+                "text": "Use os.environ.get('SECRET_KEY') instead"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "python.lang.security.audit.sql-injection.sql-injection",
+          "level": "error",
+          "message": {
+            "text": "SQL query constructed using string formatting with user input. Use parameterized queries instead."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "python-app/app.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 67,
+                  "startColumn": 5,
+                  "endLine": 67,
+                  "endColumn": 60,
+                  "snippet": {
+                    "text": "query = f\"SELECT * FROM users WHERE id = {user_id}\""
+                  }
+                }
+              }
+            }
+          ],
+          "fixes": [
+            {
+              "description": {
+                "text": "Use parameterized query: cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "python.flask.security.audit.xss.template-unescaped-with-safe.template-unescaped-with-safe",
+          "level": "warning",
+          "message": {
+            "text": "Template variable marked as safe without escaping. This could lead to XSS attacks."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "python-app/app.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 89,
+                  "startColumn": 12,
+                  "endLine": 89,
+                  "endColumn": 45,
+                  "snippet": {
+                    "text": "return Markup(user_content)"
+                  }
+                }
+              }
+            }
+          ],
+          "fixes": [
+            {
+              "description": {
+                "text": "Use escape() or let Flask auto-escape template variables"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "python.lang.security.audit.insecure-hash-function.insecure-hash-function",
+          "level": "warning",
+          "message": {
+            "text": "MD5 is cryptographically broken. Use SHA-256 or better for security purposes."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "python-app/app.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 102,
+                  "startColumn": 10,
+                  "endLine": 102,
+                  "endColumn": 35,
+                  "snippet": {
+                    "text": "hashlib.md5(password)"
+                  }
+                }
+              }
+            }
+          ],
+          "fixes": [
+            {
+              "description": {
+                "text": "Use hashlib.sha256() or bcrypt for password hashing"
+              }
+            }
+          ]
+        }
+      ],
+      "properties": {
+        "metrics": {
+          "total": 5,
+          "error": 3,
+          "warning": 2,
+          "note": 0
+        }
+      }
+    }
+  ]
+}
