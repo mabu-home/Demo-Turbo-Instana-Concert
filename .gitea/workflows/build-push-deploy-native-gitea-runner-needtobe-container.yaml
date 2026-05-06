@@ -66,6 +66,17 @@ jobs:
             echo "ℹ️  CONCERT_URL not set (Concert integration disabled)"
           fi
           
+          # Check SBOM generation setting
+          if [ -n "${{ secrets.SBOM_CREATE }}" ]; then
+            if [ "${{ secrets.SBOM_CREATE }}" = "true" ]; then
+              echo "✓ SBOM_CREATE is set to 'true' (SBOM generation enabled)"
+            else
+              echo "ℹ️  SBOM_CREATE is set to 'false' (SBOM generation disabled)"
+            fi
+          else
+            echo "ℹ️  SBOM_CREATE not set (SBOM generation disabled by default)"
+          fi
+          
           # Fail if required secrets are missing
           if [ -n "$MISSING_SECRETS" ]; then
             echo ""
@@ -871,6 +882,7 @@ jobs:
 
       # Step 12: Generate SBOM for Java App
       - name: Generate SBOM for Java App
+        if: ${{ secrets.SBOM_CREATE == 'true' }}
         continue-on-error: true
         run: |
           REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
@@ -971,6 +983,7 @@ jobs:
 
       # Step 13: Generate SBOM for Python App
       - name: Generate SBOM for Python App
+        if: ${{ secrets.SBOM_CREATE == 'true' }}
         continue-on-error: true
         run: |
           REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
